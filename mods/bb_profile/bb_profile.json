@@ -1,0 +1,11 @@
+{
+  "id": "bb_profile",
+  "name": "BotProfile",
+  "author": ["balatro-bot"],
+  "description": "Forces bot runs onto a dedicated save profile.",
+  "prefix": "BBP",
+  "main_file": "bb_profile.lua",
+  "priority": 10,
+  "version": "0.1.0",
+  "dependencies": ["Steamodded (>=1.~)"]
+}

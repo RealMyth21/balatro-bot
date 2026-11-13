@@ -1,0 +1,16 @@
+[
+  {
+    "file": "src/lua/endpoints/pack.lua",
+    "old": "local back_to_shop = G.STATE == G.STATES.SHOP\n",
+    "new": "local back_to_shop = G.STATE == G.STATES.SHOP or G.STATE == G.STATES.BLIND_SELECT -- fix: tag packs\n",
+    "count": 2,
+    "why": "A booster opened by a skip tag closes back to BLIND_SELECT, not SHOP; the request never answered."
+  },
+  {
+    "file": "src/lua/endpoints/buy.lua",
+    "old": "local needs_hand = pack_key == \"Tarot\" or pack_key == \"Spectral\"\n",
+    "new": "local needs_hand = (card.key or \"\"):find(\"arcana\") ~= nil or (card.key or \"\"):find(\"spectral\") ~= nil -- fix: pack type\n",
+    "count": 1,
+    "why": "Whether to wait for the hand was decided by the first card's set; a Celestial pack whose first card is Black Hole (Spectral) waited forever for a hand that is never dealt."
+  }
+]

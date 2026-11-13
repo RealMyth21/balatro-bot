@@ -1,0 +1,26 @@
+# Python / tooling
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.DS_Store
+
+# Everything generated or machine-specific. NEVER commit:
+#  - runtime/mods/lovely/dump: lovely writes a full copy of the (patched) game source here
+#  - runtime/logs: game logs include your Steam ID
+#  - runtime/engine_save, backups: copies of your Balatro saves/profiles
+/runtime/
+/backups/
+
+# Third-party code fetched by scripts/setup.py (pinned versions, see THIRD_PARTY_NOTICES.md)
+/vendor/
+
+# Build output (scripts/setup.py host)
+engine/host/bhost-game
+
+# Never commit game files from your own copy of Balatro
+Balatro.love/
+*.love
+*.jkr
