@@ -22,6 +22,7 @@ or endorsed by LocalThunk or Playstack.
 |---|---|---|---|
 | [coder/balatrobot](https://github.com/coder/balatrobot) | v1.5.2 (`scripts/setup.py balatrobot`) | Action API endpoints and gamestate view, run inside the engine; real-game mod (with the fixes above) | MIT, © 2025 Coder |
 | [jackdaw-balatro](https://github.com/TylerFlar/jackdaw-balatro) | v0.2.6 release wheels (`uv sync --extra sim`, hashes in `uv.lock`) | Fast simulator backend; its policies drive the comparison scripts | MIT |
+| [BalatroLLM](https://github.com/coder/balatrollm) | v1.1.1 (git tag; optional `llm` extra) | LLM harness, extended by `balatro_bot/agent/llm_runner.py` | MIT, © Coder |
 | [LuaJIT](https://github.com/LuaJIT/LuaJIT) | 2.1.1700008891, commit 43d0a19 (`scripts/setup.py luajit`, Windows/Linux only) | Engine runtime | MIT, © Mike Pall |
 
 ## Used from your machine (never distributed)

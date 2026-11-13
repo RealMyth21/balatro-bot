@@ -12,6 +12,21 @@ Tools for building and evaluating Balatro bots, with a focus on **exactness**:
   [jackdaw](https://github.com/TylerFlar/jackdaw-balatro), a fast Rust simulator (MIT).
 - **Differential testing** (`scripts/`): compare any two backends action by action, including RNG
   streams and hidden joker state.
+- **Parallel game servers** (`scripts/serve.py`): N headless games, one per port, served over balatrobot's
+  HTTP API from the exact engine or jackdaw, so any balatrobot client (such as BalatroLLM) can drive
+  them.
+- **Baselines** (`scripts/eval_fast.py`): jackdaw's smart agent, a random policy, and a search player
+  (`balatro_bot/search/`) that picks plays and discards by simulating possible worlds without peeking
+  at the seed. Runs many games in parallel and reports win rates with confidence intervals.
+- **LLM pipeline** (`scripts/run_llm.py`): plays games through
+  [BalatroLLM](https://github.com/coder/balatrollm) against those servers in parallel, with:
+  - optional analysis tools for the model (exact score ranges, chance to clear the blind);
+  - a check that the provider served the requested model;
+  - cost accounting and a budget cap;
+  - a mock model for testing without an API key.
+- **Fine-tuning data** (`scripts/export_sft.py`): logged LLM games become chat-format training examples.
+- **RL** (`scripts/rl_ppo.py`): runs jackdaw's own MaskablePPO train/evaluate examples on Black Deck /
+  Gold Stake. The scripts are unmodified; the launcher only sets the deck and stake.
 
 > **No game files are included.** You need your own copy of Balatro. See
 > [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Not affiliated with LocalThunk or Playstack.
@@ -27,6 +42,20 @@ Tools for building and evaluating Balatro bots, with a focus on **exactness**:
 Speed (Apple M2): engine ~160 ms/action (a reference, not a training environment); jackdaw
 ~1.1 ms/action through the same API with a Python policy, ~250k–420k steps/s as a native vector env.
 
+Baselines on Black Deck / Gold Stake (1,000 paired `dev` seeds): every policy so far wins **0%**
+(95% CI 0–0.4%).
+
+| Policy | Mean ante reached | Died on ante 1 | Best ante |
+|---|---|---|---|
+| random (jackdaw) | 1.01 | 99% | 3 |
+| smart agent (jackdaw) | 1.37 | 72% | 4 |
+| search (`balatro_bot/search`) | 1.91 | 38% | 5 |
+
+Search versus the smart agent: +0.54 ante (95% CI +0.49..+0.60).
+
+How results are produced is described in [docs/EVAL_PROTOCOL.md](docs/EVAL_PROTOCOL.md); what the LLM
+and fine-tuning stages need is in [docs/COMPUTE_PLAN.md](docs/COMPUTE_PLAN.md).
+
 Tested on macOS (Apple Silicon). Windows and Linux paths are implemented but untested.
 
 ## Setup
@@ -34,7 +63,7 @@ Tested on macOS (Apple Silicon). Windows and Linux paths are implemented but unt
 Requires Python 3.13+, [uv](https://docs.astral.sh/uv/), and Balatro installed through Steam.
 
 ```bash
-uv sync --group dev --extra sim            # --extra sim: jackdaw's pinned release wheel
+uv sync --group dev --extra sim --extra llm --extra train   # sim: jackdaw; llm: BalatroLLM; train: PPO
 uv run python scripts/setup.py all          # balatrobot (pinned) + engine host (macOS) or game source
 uv run python scripts/setup.py real-game    # only if you will drive the real game
 uv run pytest                               # unit tests + engine smoke tests (skipped without the game)
@@ -60,11 +89,20 @@ Both accept balatrobot v1.5.2 requests (`start`, `select`, `skip`, `play`, `disc
 `buy`, `sell`, `reroll`, `pack`, `use`, `rearrange`, `next_round`, `gamestate`, `set`).
 
 ```bash
+uv run python scripts/eval_fast.py --policy smart search --n 400 --workers 6        # baselines
+uv run python scripts/serve.py --backend engine --n 8                               # 8 game servers
+uv run python scripts/run_llm.py --mock --n 4 --parallel 4                          # LLM pipeline, mock model
+uv run python scripts/run_llm.py --label kimi --n 10 --parallel 4 --max-cost 25     # needs MOONSHOT_API_KEY
+uv run python scripts/export_sft.py --min-ante 3                                    # fine-tuning dataset
+uv run python scripts/rl_ppo.py fetch                                               # jackdaw's PPO examples
+uv run python scripts/rl_ppo.py train --deck BLACK --stake GOLD -- --timesteps 2000000
 uv run python scripts/compare_jackdaw.py --seeds 100 --policy smart                  # jackdaw vs engine
 uv run python scripts/compare_jackdaw.py --seeds 40 --assist-money 100 --assist-chips  # reach ante 8
 uv run python scripts/validate_engine.py --seeds 10                                   # engine vs real game
 uv run python scripts/bench_jackdaw.py --mode vector --envs 256
 ```
+
+BalatroLLM isn't on PyPI; the `llm` extra installs it from its v1.1.1 git tag (commit pinned in `uv.lock`).
 
 ## Things worth knowing
 
@@ -94,9 +132,13 @@ This project builds directly on:
   JSON-RPC endpoints and gamestate view run unmodified inside the engine. Two request-completion
   fixes are listed in `engine/balatrobot_fixes.json`.
 - **[jackdaw](https://github.com/TylerFlar/jackdaw-balatro)** (TylerFlar and contributors, MIT): the
-  fast simulator behind `balatro_bot/sim/`. The comparison scripts drive it with its own `SmartPolicy` and
-  `RandomPolicy`. `engine/lua/determinism.lua` uses jackdaw's `PAIRS_ORDER` (LuaJIT 2.0.5's hand order).
+  fast simulator behind `balatro_bot/sim/`, the game servers and the analysis tools. The comparison
+  scripts and baselines use its own `SmartPolicy`, `RandomPolicy` and `smart_agent`. The search player
+  is built on its `clone`, `preview_play` and snapshot API. `engine/lua/determinism.lua` uses jackdaw's `PAIRS_ORDER` (LuaJIT 2.0.5's hand order).
   Not comparing text fields follows jackdaw's own lockstep validation.
+- **[BalatroLLM](https://github.com/coder/balatrollm)** (Coder; S1M0N38 and contributors, MIT): the
+  LLM harness (prompts, strategies, client, logs), extended in `balatro_bot/agent/llm_runner.py`. Its run
+  logs are also what BalatroBench analyzes.
 - **[LuaJIT](https://github.com/LuaJIT/LuaJIT)** (Mike Pall, MIT): the engine runs on the version the game
   ships, 2.1.1700008891.
 - **[rxi/json.lua](https://github.com/rxi/json.lua)** (MIT), vendored in `engine/lua/vendor/`.
@@ -104,8 +146,11 @@ This project builds directly on:
   **[Steamodded](https://github.com/Steamodded/smods)** (GPL-3.0): required by balatrobot for the
   real-game harness. They are used from your own install and never copied here.
 
-Related work: [balatro-headless](https://github.com/bapbapbapbap/balatro-headless) independently
-runs the game's Lua headless in a similar way; no code from it is used here.
+Related work, with no code used here:
+- [balatro-headless](https://github.com/bapbapbapbap/balatro-headless) independently runs the game's
+  Lua headless in a similar way.
+- [Attol8/balatro-ai](https://github.com/Attol8/balatro-ai) (AGPL-3.0) gives an LLM precomputed exact
+  analysis.
 
 ## License
 
