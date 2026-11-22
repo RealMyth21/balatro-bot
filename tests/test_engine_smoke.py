@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from balatro_bot.engine.client import ROOT, EngineClient, default_luajit
@@ -78,3 +80,20 @@ def test_bot_profile_comes_from_the_environment(monkeypatch):
     assert engine_env(profile=2)["BOT_PROFILE"] == "2"
     monkeypatch.delenv("BOT_PROFILE")
     assert engine_env()["BOT_PROFILE"] == "2"
+
+
+def test_a_stuck_engine_is_stopped_and_replaced(monkeypatch):
+    """A request that never comes back (a loop inside one frame, which the engine's own frame limit
+    can't catch) fails after call_timeout with INTERNAL_ERROR; the next call gets a fresh engine."""
+    from balatro_bot.game.client import RPCError
+
+    monkeypatch.setenv("ENGINE_HOOKS", str(ROOT / "tests/data/hang_hook.lua"))
+    with EngineClient(call_timeout=3) as eng:
+        eng.menu()
+        eng.start("BLACK", "GOLD", "HANGTEST")
+        t0 = time.perf_counter()
+        with pytest.raises(RPCError) as err:
+            eng.call("engine_test_hang")
+        assert err.value.name == "INTERNAL_ERROR" and "did not answer" in err.value.message
+        assert time.perf_counter() - t0 < 60
+        assert eng.menu()["state"] == "MENU" and eng.restarts == 1

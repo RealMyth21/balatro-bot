@@ -1,8 +1,9 @@
-"""Serve the exact engine over balatrobot's HTTP JSON-RPC 2.0 API (one game per port).
+"""Serve the exact engine (or jackdaw) over balatrobot's HTTP JSON-RPC 2.0 API (one game per port).
 
 Any balatrobot client can then drive it: BalatroLLM, jackdaw's LiveBackend, our BalatroClient.
 
   python -m balatro_bot.engine.server --port 13000
+  python -m balatro_bot.engine.server --port 13000 --backend jackdaw   # jackdaw, with our corrections
 
 Requests are handled one at a time (one game per server, like balatrobot). Unknown request fields
 (e.g. BalatroLLM's `reasoning` argument) are ignored by balatrobot's validator, as in the real game.
@@ -72,11 +73,20 @@ class _Handler(BaseHTTPRequestHandler):
                     "code": -32000, "message": f"{type(e).__name__}: {e}", "data": {"name": "INTERNAL_ERROR"}}})
 
 
-def serve(host: str = "127.0.0.1", port: int = 13000, ready: threading.Event | None = None) -> None:
-    """Bind first (port 0 = any free port) and announce the port, then boot the engine and serve."""
+def serve(host: str = "127.0.0.1", port: int = 13000, ready: threading.Event | None = None,
+          backend: str = "engine") -> None:
+    """Bind first (port 0 = any free port) and announce the port, then boot the game and serve.
+    backend "jackdaw": jackdaw's simulator with the corrections in balatro_bot/sim/jackdaw_fixes.py
+    (instead of `jackdaw serve`, which runs jackdaw as released)."""
     with EngineHTTPServer((host, port)) as httpd:
-        print(f"engine serve: balatrobot API on http://{host}:{httpd.server_address[1]}", flush=True)
-        with EngineClient() as eng:
+        print(f"{backend} serve: balatrobot API on http://{host}:{httpd.server_address[1]}", flush=True)
+        if backend == "jackdaw":
+            from balatro_bot.sim.jackdaw_backend import JackdawClient
+
+            client = JackdawClient()
+        else:
+            client = EngineClient()
+        with client as eng:
             httpd.engine = eng
             if ready:
                 ready.set()
@@ -90,8 +100,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=13000, help="0 picks a free port (printed on startup)")
+    ap.add_argument("--backend", default="engine", choices=["engine", "jackdaw"])
     args = ap.parse_args()
-    serve(args.host, args.port)
+    serve(args.host, args.port, backend=args.backend)
 
 
 if __name__ == "__main__":

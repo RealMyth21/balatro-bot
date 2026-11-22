@@ -12,7 +12,7 @@
 
 The model is any OpenAI-compatible server; by default a local one (vLLM) at http://127.0.0.1:8000/v1,
 which needs no key. Games run on our exact engine by default (real description text for the prompt;
-needs a Balatro install); --backend jackdaw uses the simulator (text fields are names only).
+needs a Balatro install); --backend jackdaw uses the simulator (card text in our own words, same numbers).
 Per-game summaries go to runtime/eval/llm.jsonl and full BalatroLLM logs to runtime/llm_runs/.
 Rerunning skips seeds already finished under the same label, deck, stake and model, and retries seeds
 that stopped on an infrastructure error (model server down, dead game server, budget stop); those are

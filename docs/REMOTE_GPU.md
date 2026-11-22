@@ -130,4 +130,4 @@ Each setting gets its own label (e.g. `qwen3-8b-baseline`, `qwen3-8b-notools`), 
 Game records keep every tool's full answer for the viewer whatever the model was offered.
 
 If running everything on the GPU machine instead (simulator games, no Balatro needed), see
-[GPU_RUN.md](GPU_RUN.md); those games use jackdaw, whose prompts lack the card text.
+[GPU_RUN.md](GPU_RUN.md); those games use jackdaw, whose card text is our own wording.

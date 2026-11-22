@@ -55,7 +55,9 @@ def _make_policy(name: str, seed: str, opts: dict):
 
 def play_one(policy: str, seed: str, deck: str, stake: str, opts: dict, max_steps: int = 4000) -> dict:
     from jackdaw.core import Game, NotPortedError
-    from jackdaw.engine.actions import GamePhase
+    from jackdaw.engine.actions import GamePhase, SelectBlind
+
+    from balatro_bot.sim.jackdaw_fixes import fixed_for_select
 
     t0 = time.perf_counter()
     g = Game.new(back=DECKS[deck], stake=STAKES[stake], seed=seed)
@@ -64,7 +66,10 @@ def play_one(policy: str, seed: str, deck: str, stake: str, opts: dict, max_step
     error = kind = None
     while g.phase != GamePhase.GAME_OVER and not g.won and steps < max_steps:
         try:
-            g.step(act(g))
+            action = act(g)
+            if isinstance(action, SelectBlind):  # jackdaw corrected where it differs from the game
+                g = fixed_for_select(g)
+            g.step(action)
         except NotPortedError as e:  # content jackdaw can't run: says nothing about the policy
             error, kind = f"NotPortedError: {e}", "infra"
             break

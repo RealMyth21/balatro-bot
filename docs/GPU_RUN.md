@@ -2,7 +2,7 @@
 
 > For the baseline, the preferred setup runs the games on the real game on another computer and only the
 > model here: see [REMOTE_GPU.md](REMOTE_GPU.md). This page runs everything here on the jackdaw
-> simulator, whose prompts lack the card text.
+> simulator, whose prompts describe cards in our own words (same numbers as the game).
 
 Thanks for lending your GPU. One script does everything: it installs what it needs, runs an AI model
 on your GPU, has it play Balatro in a simulator, and packs the results into one file for you to send

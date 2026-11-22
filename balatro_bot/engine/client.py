@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import shutil
 import subprocess
 import tempfile
@@ -87,6 +88,9 @@ class EngineClient:
     timings: list[CallTiming] = field(default_factory=list)
     total_ticks: int = 0
     restarts: int = 0
+    # Longest a request may take, in seconds (ENGINE_CALL_TIMEOUT; 0 = no limit). The engine ends a request
+    # that never completes after MAX_TICKS frames, but a loop inside one frame never reaches that check.
+    call_timeout: float = field(default_factory=lambda: float(os.environ.get("ENGINE_CALL_TIMEOUT", "120")))
 
     def __post_init__(self):
         self._id = 0
@@ -124,6 +128,33 @@ class EngineClient:
             raise
         self.version = info.get("version")
 
+    def _wait_for_answer(self, method: str) -> None:
+        """Wait at most call_timeout for the engine's answer. If it doesn't come, save a stack sample of
+        the stuck engine (macOS `sample`) for diagnosis, stop it, and fail the request: the next call
+        restarts the engine, and the game in progress is reported lost, as after any engine error."""
+        if not self.call_timeout or os.name == "nt":  # select() can't wait on pipes on Windows
+            return
+        ready, _, _ = select.select([self._proc.stdout], [], [], self.call_timeout)
+        if ready:
+            return
+        where = self._sample_stuck_engine(method)
+        self._kill()
+        raise RPCError(method, -32000, "INTERNAL_ERROR",
+                       f"engine did not answer {method} within {self.call_timeout:g} s and was stopped"
+                       + (f" (stack sample: {where})" if where else ""))
+
+    def _sample_stuck_engine(self, method: str) -> str | None:
+        tool = shutil.which("sample")
+        if not tool:
+            return None
+        out = ROOT / "runtime/logs/engine_hangs" / f"{time.strftime('%Y%m%d-%H%M%S')}-{method}-{self._proc.pid}.txt"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            subprocess.run([tool, str(self._proc.pid), "2", "-file", str(out)], capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return str(out) if out.exists() else None
+
     def _kill(self) -> None:
         if self._proc.poll() is None:
             self._proc.kill()
@@ -146,6 +177,7 @@ class EngineClient:
         try:
             self._proc.stdin.write(json.dumps(req) + "\n")
             self._proc.stdin.flush()
+            self._wait_for_answer(method)
             line = self._proc.stdout.readline()
         except (BrokenPipeError, OSError):
             line = ""

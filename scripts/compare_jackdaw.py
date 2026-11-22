@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import sys
 import threading
 import time
@@ -113,12 +114,15 @@ class CollectorPolicy:
 
 def run_seed(seed: str, deck: str, stake: str, policy_name: str, max_steps: int,
              assist_money: int = 0, assist_chips: bool = False, start_ante: int = 0,
-             deep: bool = True) -> dict:
+             deep: bool = True, unpatched: bool = False, check_text: bool = False) -> dict:
     from jackdaw.bridge.backend import SimBackend
     from jackdaw.bridge.lockstep import RandomPolicy, SmartPolicy
 
+    from balatro_bot.sim.jackdaw_fixes import FixedSimBackend
+
     eng = engine()
-    jd = SimBackend()
+    jd = SimBackend() if unpatched else FixedSimBackend(describe=check_text)  # unless testing raw jackdaw
+    texts: dict = {}  # --check-text: effect-text comparisons per item
     rng = random.Random(seed)
     policy = {"smart": SmartPolicy, "random": RandomPolicy, "collector": CollectorPolicy}[policy_name]()
 
@@ -131,7 +135,7 @@ def run_seed(seed: str, deck: str, stake: str, policy_name: str, max_steps: int,
     cov = coverage.new()
 
     def done(result: dict) -> dict:
-        return {**result, "coverage": coverage.to_json(cov)}
+        return {**result, "coverage": coverage.to_json(cov), **({"texts": texts} if check_text else {})}
 
     def both(method, params):
         nonlocal a, b, last
@@ -155,6 +159,8 @@ def run_seed(seed: str, deck: str, stake: str, policy_name: str, max_steps: int,
                              "ante": a.get("ante_num"), "state": a.get("state"), "trace": trace})
             return done({"seed": seed, "result": "won", "step": step, "ante": a.get("ante_num")})
         d = diff_views(a, b)
+        if not d and check_text:
+            compare_texts(a, b, texts)
         if not d and deep:
             d = deep_diff(eng.call("engine_debug_state"), jd.game)
         if d:
@@ -207,6 +213,45 @@ def run_seed(seed: str, deck: str, stake: str, policy_name: str, max_steps: int,
     return done({"seed": seed, "result": "max_steps", "step": max_steps, "ante": a.get("ante_num")})
 
 
+_NUM = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _numbers(text: str) -> list[float]:
+    return sorted(float(x) for x in _NUM.findall(text or ""))
+
+
+def compare_texts(a: dict, b: dict, out: dict) -> None:
+    """Compare the effect text of every item in two views of the same state by the numbers in it
+    (the wording is our own, the numbers must be the game's): counts per item in `out`."""
+    def note(key, ea, eb):
+        if ea and not re.search(r"[A-Za-z]", ea):  # the game's text wasn't captured (Misprint's animated text)
+            return
+        if re.search(r"#\d#", ea or "") or (ea or "").startswith(" "):  # the game left a value unfilled
+            return
+        r = out.setdefault(key, {"checked": 0, "wrong": 0})
+        r["checked"] += 1
+        if _numbers(ea) != _numbers(eb) or (ea and not eb):
+            r["wrong"] += 1
+            r.setdefault("example", {"engine": ea, "jackdaw": eb})
+
+    for area in ("jokers", "consumables", "hand", "cards", "shop", "vouchers", "packs", "pack"):
+        ca, cb = (a.get(area) or {}).get("cards") or [], (b.get(area) or {}).get("cards") or []
+        for x, y in zip(ca, cb, strict=False):
+            st = x.get("state") or {}
+            if st.get("hidden") or st.get("debuff") or x.get("key") != y.get("key"):
+                continue
+            m = x.get("modifier") or {}
+            playing = x.get("set") in ("DEFAULT", "ENHANCED")
+            key = f"card:{m.get('enhancement') or 'BASE'}" if playing else x.get("key")
+            note(key, (x.get("value") or {}).get("effect") or "", (y.get("value") or {}).get("effect") or "")
+    for slot, ba in (a.get("blinds") or {}).items():
+        bb = (b.get("blinds") or {}).get(slot) or {}
+        if ba.get("name") == bb.get("name") and ba.get("name"):
+            note(f"blind:{ba['name']}", ba.get("effect") or "", bb.get("effect") or "")
+        if ba.get("tag_name") and ba.get("tag_name") == bb.get("tag_name"):
+            note(f"tag:{ba['tag_name']}", ba.get("tag_effect") or "", bb.get("tag_effect") or "")
+
+
 def run_seed_safe(seed: str, *args, **kw) -> dict:
     """run_seed, with a crash in either engine reported as a result instead of stopping the run."""
     try:
@@ -233,6 +278,11 @@ def main() -> None:
                     help="before the last hand of a round, set the score to target-1 so runs reach ante 8")
     ap.add_argument("--start-ante", type=int, default=0)
     ap.add_argument("--no-deep", action="store_true", help="skip RNG-stream and hidden-ability checks")
+    ap.add_argument("--check-text", action="store_true",
+                    help="also compare the numbers in every effect text with jackdaw's descriptions")
+    ap.add_argument("--text-out", type=Path, default=None, help="with --check-text: write the per-item results")
+    ap.add_argument("--unpatched", action="store_true",
+                    help="test jackdaw as released, without balatro_bot/sim/jackdaw_fixes.py")
     ap.add_argument("--out", type=Path, default=Path("runtime/logs/jackdaw_diffs.jsonl"))
     ap.add_argument("--coverage-out", type=Path, default=None,
                     help="JSON file to merge this run's content coverage into (cumulative across runs)")
@@ -247,7 +297,8 @@ def main() -> None:
     cov = coverage.new()
     with ThreadPoolExecutor(args.workers) as pool, args.out.open("a") as fh:
         futs = [pool.submit(run_seed_safe, s, args.deck, args.stake, args.policy, args.max_steps,
-                            args.assist_money, args.assist_chips, args.start_ante, not args.no_deep)
+                            args.assist_money, args.assist_chips, args.start_ante, not args.no_deep,
+                            args.unpatched, args.check_text)
                 for s in seeds]
         for f in futs:
             r = f.result()
@@ -264,6 +315,23 @@ def main() -> None:
                      else f" -> {r['diff']}" if r["result"] == "crashed" else "")
             print(f"{r['seed']}: {tag} at step {r['step']} (ante {r.get('ante')}){extra}", flush=True)
 
+    if args.check_text:  # per item: how often its numbers differed from the game's text
+        merged: dict = {}
+        for r in results:
+            for k, v in (r.get("texts") or {}).items():
+                m = merged.setdefault(k, {"checked": 0, "wrong": 0})
+                m["checked"] += v["checked"]
+                m["wrong"] += v["wrong"]
+                if v.get("example") and not m.get("example"):
+                    m["example"] = v["example"]
+        wrong = {k: v for k, v in merged.items() if v["wrong"]}
+        print(f"\neffect text: {len(merged)} items checked ({sum(v['checked'] for v in merged.values())} times), "
+              f"{len(wrong)} with numbers that differ from the game's")
+        for k, v in sorted(wrong.items()):
+            ex = v.get("example") or {}
+            print(f"  {k}: {v['wrong']}/{v['checked']}  game={ex.get('engine')!r}  ours={ex.get('jackdaw')!r}")
+        if args.text_out:
+            args.text_out.write_text(json.dumps(merged, indent=1))
     counts = Counter(r["result"] for r in results)
     steps = sum(r["step"] for r in results)
     print(f"\n{len(results)} seeds, {steps} steps compared in {time.perf_counter() - t0:.0f}s "

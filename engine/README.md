@@ -62,6 +62,20 @@ shown identical to a real Unlock All profile). To use one of your own profiles i
   runner counts such games as infrastructure errors and replays them later.
 - A reply that can't be encoded (e.g. NaN in a game value) becomes an `INTERNAL_ERROR` instead of
   ending the process.
+- A request that never comes back is stopped by `EngineClient` after `ENGINE_CALL_TIMEOUT` seconds
+  (default 120): the engine's own limit counts frames, so a loop inside one frame would otherwise wait
+  forever. The stuck engine's stack is sampled to `runtime/logs/engine_hangs/` (macOS `sample`; it
+  shows the native frames, so it tells game code from the host), the engine is stopped, and the request
+  fails with `INTERNAL_ERROR` as above. This happened once, under heavy load (five engines at once),
+  and didn't come back in eight runs under the same load.
+
+## Debug hooks
+
+`ENGINE_HOOKS=<file.lua>` runs extra Lua after boot, for instrumentation and tests only.
+`engine/hooks/engine_add.lua` adds an `engine_add` endpoint that puts a joker, consumable or (in the
+shop) voucher into the run with the game's own `create_card`; balatrobot's `add` needs Steamodded, which
+the engine doesn't run. `tests/test_jackdaw_fixes.py` uses it to check jackdaw's card text on items that
+rarely come up in play.
 
 ## Validation
 

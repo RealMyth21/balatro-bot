@@ -11,7 +11,7 @@ Target: **Black Deck, Gold Stake**, Balatro 1.0.1o. Primary metric: win rate (be
 ## Where games run
 | Player | Backend | Why |
 |---|---|---|
-| LLM (open-weights model on the RTX 4090 via vLLM, played by BalatroLLM) | exact engine where Balatro is installed; otherwise jackdaw | the engine gives real description text in prompts; jackdaw gives names only |
+| LLM (open-weights model on the RTX 4090 via vLLM, played by BalatroLLM) | exact engine where Balatro is installed; otherwise jackdaw | the engine gives the game's description text in prompts; jackdaw gives ours, with the same numbers |
 | Analysis tools for the LLM | jackdaw shadow in lockstep | exact score ranges and clear odds |
 | Fast policies (smart, search, PPO) | jackdaw | 1000s of games per hour |
 | Spot checks | real game via balatrobot | ground truth; slow and occasionally hangs |

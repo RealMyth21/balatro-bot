@@ -117,9 +117,9 @@ class Shadow:
     """A jackdaw run kept in lockstep with the real backend."""
 
     def __init__(self):
-        from jackdaw.bridge.backend import SimBackend
+        from balatro_bot.sim.jackdaw_fixes import FixedSimBackend
 
-        self.sim = SimBackend()
+        self.sim = FixedSimBackend()  # jackdaw with our corrections (sim/jackdaw_fixes.py)
         self.ok = True
         self.reason = ""
         self.plays_checked = 0  # plays whose predicted score was compared with the real game's

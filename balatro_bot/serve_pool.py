@@ -1,8 +1,9 @@
 """Start N game servers (balatrobot's HTTP API) for parallel games, one game per server.
 
 Backends:
-  engine   our exact engine (real game code, real description text)   python -m balatro_bot.engine.server
-  jackdaw  jackdaw's simulator (fast; text fields are names)            jackdaw serve
+  engine   our exact engine (real game code, real description text)
+  jackdaw  jackdaw's simulator with our corrections and card text (fast)
+Both are served by `python -m balatro_bot.engine.server [--backend jackdaw]`.
 
   with ServerPool("engine", n=8) as pool:
       pool.ports  # -> the ports the servers bound, e.g. [53012, 53013, ...]
@@ -18,7 +19,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -52,12 +52,8 @@ class ServerPool:
         self._tag = f"{os.getpid()}-{uuid.uuid4().hex[:6]}"  # log names unique to this pool
 
     def _cmd(self, port: int) -> list[str]:
-        if self.backend == "engine":
-            return [sys.executable, "-m", "balatro_bot.engine.server", "--port", str(port)]
-        jd = shutil.which("jackdaw", path=str(Path(sys.executable).parent)) or shutil.which("jackdaw")
-        if not jd:
-            raise RuntimeError("jackdaw not installed (uv sync --extra sim)")
-        return [jd, "serve", "--port", str(port)]
+        # jackdaw runs in our own server so it gets our corrections (sim/jackdaw_fixes.py)
+        return [sys.executable, "-m", "balatro_bot.engine.server", "--port", str(port), "--backend", self.backend]
 
     def _spawn(self, port: int, index: int) -> tuple[subprocess.Popen, Path]:
         env = dict(os.environ, PYTHONPATH=str(ROOT) + os.pathsep + os.environ.get("PYTHONPATH", ""))

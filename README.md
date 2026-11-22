@@ -184,16 +184,21 @@ for single-player runs); no code or art is shared.
 - **balatrobot's game state includes face-down cards' identities** (flagged `state.hidden`).
   BalatroLLM's prompt hides them; any other prompt or tool must too. The game itself counts face-down
   hand cards as still in the deck, which is how the search and tools treat them.
-- **jackdaw v0.2.6 differs from the game in two cases found so far**, both when Ceremonial Dagger
-  destroys a joker at blind select (assisted Black/Gold runs; the real game was replayed to confirm):
-  - destroying a joker that changes hand size: jackdaw deals the first hand with the old size (Turtle
-    Bean: 14 cards instead of 9, seed `JDA01010`; Troubadour: 10 instead of 8, `JDA02028`; Merry Andy
-    under The Manacle: 6 instead of 7, `JDC04019`, not yet replayed on the real game);
-  - with Riff-raff: the game frees the destroyed joker before Riff-raff creates its jokers, so it can
-    create the same joker again (Abstract Joker on seed `JDA02034`, in balatrobot's fast mode and at
-    normal speed); jackdaw still counts it as owned and draws a different one (Mail-In Rebate).
+- **jackdaw v0.2.6 differs from the game when Ceremonial Dagger destroys a joker at blind select;
+  we correct it** (`balatro_bot/sim/jackdaw_fixes.py`, used everywhere the project runs jackdaw). The
+  game removes the destroyed joker before the round's first hand is drawn and before the jokers to the
+  Dagger's right act; jackdaw removes it afterwards:
+  - a joker that changes hand size: jackdaw dealt the first hand at the old size (Turtle Bean: 14
+    cards instead of 9, seed `JDA01010`; Troubadour: 10 instead of 8, `JDA02028`; Merry Andy under The
+    Manacle: 6 instead of 7, `JDC04019`);
+  - Riff-raff: the game has already freed the destroyed joker (out of `used_jokers`) when Riff-raff
+    creates, so it can create the same joker again (Abstract Joker on `JDA02034`); jackdaw still
+    counted it as used and drew Mail-In Rebate.
 
-  Everything else matched; see the validation table. Two smaller differences found since:
+  All four now match the real game from start to finish (`tests/test_jackdaw_fixes.py` replays them on
+  the engine). After the fix, 72 new seeds (smart, collector and random policies, about 17,600 steps,
+  with RNG-stream checks) matched with no difference; `scripts/compare_jackdaw.py --unpatched` tests
+  jackdaw as released. Two smaller differences:
   - after Amber Acorn is beaten the game keeps the jokers face down on the round summary; jackdaw
     turns them face up at once (nothing is decided there, so checks skip that screen);
   - jackdaw's request bridge accepts `use` and `sell` on the round summary and in open packs, where the
@@ -205,8 +210,16 @@ for single-player runs); no code or art is shared.
   for the rest of that game (a note in the record; `analysis` in the result row and the run summary
   name the games), and `scripts/record_game.py` on the engine stops the game with the difference as
   its error instead of playing on from a wrong state.
-- **Text fields differ by design** between the real game (localized descriptions) and jackdaw (names);
-  comparisons skip them. An LLM agent on jackdaw needs its own descriptions.
+- **Effect text on jackdaw is our own.** jackdaw's views name items without describing them, so for
+  anything a model reads (LLM games and records on jackdaw) `balatro_bot/sim/descriptions.py` fills in
+  each joker's, consumable's, voucher's, pack's, boss blind's, tag's and playing card's effect, with the
+  current values the game shows ("Currently X2.5 Mult"). The wording is ours (the game's text isn't
+  reproduced); the numbers are checked against the real game:
+  `scripts/compare_jackdaw.py --check-text` compared 314 items 135,506 times with no difference, and
+  the items too rare to come up in those runs (the legendary jokers, Cavendish, Misprint, Planet X,
+  Ceres, Eris, Retcon) are put into the real game by a test-only engine hook
+  (`engine/hooks/engine_add.lua`) and checked in `tests/test_jackdaw_fixes.py`. Rules comparisons skip
+  text fields.
 
 ## Acknowledgements and references
 

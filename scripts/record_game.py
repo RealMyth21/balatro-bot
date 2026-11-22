@@ -47,13 +47,13 @@ def _action_str(a) -> str:
 
 def record(seed: str, policy: str, backend: str, deck: str, stake: str, out: Path, max_steps: int,
            assist_money: int = 0, assist_chips: bool = False) -> dict:
-    from jackdaw.bridge.backend import SimBackend
     from jackdaw.bridge.lockstep import RandomPolicy
     from jackdaw.cli.smart_agent import smart_agent
 
     from balatro_bot.search.round_search import RoundSearchPolicy
+    from balatro_bot.sim.jackdaw_fixes import FixedSimBackend
 
-    jd = SimBackend()  # the decision-maker's copy
+    jd = FixedSimBackend(describe=backend == "jackdaw")  # the decision-maker's copy (corrected jackdaw)
     eng = None
     if backend == "engine":
         from balatro_bot.engine.client import EngineClient

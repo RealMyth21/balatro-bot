@@ -20,9 +20,9 @@ class JackdawClient:
     record_timings: bool = False
 
     def __post_init__(self):
-        from jackdaw.bridge.backend import SimBackend
+        from balatro_bot.sim.jackdaw_fixes import FixedSimBackend
 
-        self.sim = SimBackend()
+        self.sim = FixedSimBackend(describe=True)  # corrected jackdaw, with the game's effect text
 
     def call(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         from jackdaw.bridge.backend import RPCError as JdError
