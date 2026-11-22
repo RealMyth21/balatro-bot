@@ -55,7 +55,18 @@ def test_cost_accounting(tmp_path: Path):
     c = run_cost(rd, Prices(input=2.0, output=10.0, cached_input=0.2))
     # per call: 600 uncached * 2 + 400 cached * 0.2 + 100 out * 10 = 2280 / 1e6 USD; 4 calls
     assert abs(c["cost_usd"] - 4 * 2280 / 1e6) < 1e-12
-    assert c["tokens"] == {"prompt": 4000, "completion": 400, "cached": 1600, "calls": 4}
+    assert c["tokens"] == {"prompt": 4000, "completion": 400, "cached": 1600, "calls": 4, "failed_calls": 0}
+
+
+def test_cost_counts_moonshot_cached_tokens(tmp_path: Path):
+    rd = tmp_path / "m"
+    rd.mkdir()
+    usage = {"prompt_tokens": 1000, "completion_tokens": 100, "cached_tokens": 400}  # Moonshot puts it top-level
+    lines = [{"response": {"body": {"usage": usage}}}, {"error": {"code": "timeout", "message": "t"}}]
+    (rd / "responses.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    c = run_cost(rd, Prices(input=2.0, output=10.0, cached_input=0.2))
+    assert c["tokens"]["cached"] == 400 and c["tokens"]["failed_calls"] == 1
+    assert abs(c["cost_usd"] - (600 * 2 + 400 * 0.2 + 100 * 10) / 1e6) < 1e-12
 
 
 def test_report_statistics():
@@ -82,3 +93,21 @@ def test_mock_model_picks_valid_tools():
             "name": n, "parameters": {"type": "object", "properties": {"reasoning": {"type": "string"}}}}}
     assert choose_tool_call([tool("buy"), tool("next_round")]) == ("next_round", {"reasoning": "mock"})
     assert choose_tool_call([tool("play"), tool("discard")])[0] == "play"
+
+
+def test_report_scores_errors_by_kind():
+    from balatro_bot.eval.report import error_kind, paired, summarize
+
+    rows = [
+        {"seed": "A", "policy": "p", "won": False, "ante": None, "error": "BotError: LLM error: 503"},  # infra
+        {"seed": "A", "policy": "p", "won": True, "ante": 9, "error": None},  # its retry
+        {"seed": "B", "policy": "p", "won": False, "ante": 4,
+         "error": "BotError: Too many consecutive error/failed calls"},  # the model's own failure
+        {"seed": "C", "policy": "p", "won": False, "ante": None, "error": "ConnectError: refused"},  # infra only
+    ]
+    assert [error_kind(r) for r in rows] == ["infra", None, "policy", "infra"]
+    s = summarize(rows)
+    assert (s["games"], s["wins"], s["mean_ante"]) == (2, 1, 6.5)
+    assert s["policy_failures"] == 1 and s["excluded_infra_errors"] == 1
+    p = paired(rows, [{"seed": "A", "won": False, "ante": 3}, {"seed": "C", "won": False, "ante": 2}])
+    assert p["common_seeds"] == 1 and p["wins_only_a"] == 1

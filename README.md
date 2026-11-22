@@ -16,15 +16,22 @@ Tools for building and evaluating Balatro bots, with a focus on **exactness**:
   HTTP API from the exact engine or jackdaw, so any balatrobot client (such as BalatroLLM) can drive
   them.
 - **Baselines** (`scripts/eval_fast.py`): jackdaw's smart agent, a random policy, and a search player
-  (`balatro_bot/search/`) that picks plays and discards by simulating possible worlds without peeking
-  at the seed. Runs many games in parallel and reports win rates with confidence intervals.
+  (`balatro_bot/search/`) that picks plays and discards by simulating possible worlds. It never peeks
+  at the seed, the draw order or face-down cards: every decision is a function of what a player sees
+  (tested). Runs many games in parallel and reports win rates with confidence intervals.
 - **LLM pipeline** (`scripts/run_llm.py`): plays games through
   [BalatroLLM](https://github.com/coder/balatrollm) against those servers in parallel, with:
-  - optional analysis tools for the model (exact score ranges, chance to clear the blind);
+  - optional analysis tools for the model: exact score ranges and the chance to clear the blind while
+    playing a hand, and in shops and packs how far the run gets after each option (`evaluate_options`);
   - a check that the provider served the requested model;
-  - cost accounting and a budget cap;
+  - cost accounting and a budget cap checked before every call;
+  - infrastructure failures (outages, dead servers) kept out of the results and retried;
   - a mock model for testing without an API key.
 - **Fine-tuning data** (`scripts/export_sft.py`): logged LLM games become chat-format training examples.
+- **Game records and a replay viewer** (`viewer/index.html`): every LLM game writes a record of every
+  step, the model's reasoning and each analysis tool's full answer; `scripts/record_game.py` records
+  non-LLM players. Step through a game ante by ante, see the board, the deck and the decision, and keep
+  notes on any step.
 - **RL** (`scripts/rl_ppo.py`): runs jackdaw's own MaskablePPO train/evaluate examples on Black Deck /
   Gold Stake. The scripts are unmodified; the launcher only sets the deck and stake.
 
@@ -35,11 +42,16 @@ Tools for building and evaluating Balatro bots, with a focus on **exactness**:
 
 | Check | Result |
 |---|---|
-| Engine vs real game (balatrobot), Black Deck / Gold Stake | identical on 25 seeds (scripted and random policies) |
-| jackdaw v0.2.6 vs engine, Black Deck / Gold Stake | identical on 200 seeds through game over (antes 1–5) |
-| Late game (antes 6–8), RNG streams + hidden joker state every step | see [engine/README.md](engine/README.md) |
+| Engine vs real game (balatrobot), Black Deck / Gold Stake | identical in all 45 seed runs (25 scripted/random, 20 pack-heavy mixed) |
+| jackdaw v0.2.6 vs engine, Black/Gold, RNG streams + hidden joker state every step | 400/400 seeds identical through game over (random, smart policies) |
+| Same, assisted to ante 8 (money top-ups, score set just short of the blind) | 78/80 identical (62 runs won); 2 jackdaw differences, below |
+| Same, other decks/stakes (Red/White, Plasma/Gold, Abandoned/Blue, Erratic/Gold) | 160/160 identical |
+| Same, collector policy (buys, opens and uses everything) assisted to ante 8 | 99/100 identical after a balatrobot fix (80 runs won); 1 jackdaw difference |
+| Content exercised by those runs | all 28 bosses, 24 tags, 32 vouchers, 15 booster kinds, editions, enhancements, seals, stickers; 144/150 jokers (not Cavendish or 5 legendaries); 50/52 consumables (not Eris, The Soul) |
 
-Speed (Apple M2): engine ~160 ms/action (a reference, not a training environment); jackdaw
+Details in [engine/README.md](engine/README.md).
+
+Speed (Apple M2): engine ~120–160 ms/action (a reference, not a training environment); jackdaw
 ~1.1 ms/action through the same API with a Python policy, ~250k–420k steps/s as a native vector env.
 
 Baselines on Black Deck / Gold Stake (1,000 paired `dev` seeds): every policy so far wins **0%**
@@ -49,9 +61,10 @@ Baselines on Black Deck / Gold Stake (1,000 paired `dev` seeds): every policy so
 |---|---|---|---|
 | random (jackdaw) | 1.01 | 99% | 3 |
 | smart agent (jackdaw) | 1.37 | 72% | 4 |
-| search (`balatro_bot/search`) | 1.91 | 38% | 5 |
+| search (`balatro_bot/search`) | 1.89 | 36% | 5 |
 
-Search versus the smart agent: +0.54 ante (95% CI +0.49..+0.60).
+Search versus the smart agent: +0.52 ante (95% CI +0.47..+0.57). The search decides only on what a
+player sees (no face-down cards, draw order or seed); it takes ~3 s per game on one core.
 
 How results are produced is described in [docs/EVAL_PROTOCOL.md](docs/EVAL_PROTOCOL.md); what the LLM
 and fine-tuning stages need is in [docs/COMPUTE_PLAN.md](docs/COMPUTE_PLAN.md).
@@ -98,11 +111,33 @@ uv run python scripts/rl_ppo.py fetch                                           
 uv run python scripts/rl_ppo.py train --deck BLACK --stake GOLD -- --timesteps 2000000
 uv run python scripts/compare_jackdaw.py --seeds 100 --policy smart                  # jackdaw vs engine
 uv run python scripts/compare_jackdaw.py --seeds 40 --assist-money 100 --assist-chips  # reach ante 8
+uv run python scripts/compare_jackdaw.py --seeds 100 --policy collector --assist-money 100 --assist-chips \
+    --coverage-out runtime/logs/coverage.json                                        # rare content
 uv run python scripts/validate_engine.py --seeds 10                                   # engine vs real game
 uv run python scripts/bench_jackdaw.py --mode vector --envs 256
 ```
 
 BalatroLLM isn't on PyPI; the `llm` extra installs it from its v1.1.1 git tag (commit pinned in `uv.lock`).
+
+## Reviewing games
+
+Every LLM game writes `record.jsonl` next to BalatroLLM's logs (`runtime/llm_runs/...`): one line per
+request sent to the game, in order, with who decided it (the model, a policy or the harness), the
+resulting game state, and for model decisions the reasoning, every analysis tool call with its full
+result, tokens and cost. Records are written as the game goes, so a game in progress can be opened.
+
+```bash
+uv run python scripts/record_game.py --policy search --assist-money 60 --assist-chips   # record a bot game
+uv run python scripts/view_record.py                                                    # open the viewer
+```
+
+The viewer (`viewer/index.html`, no dependencies) shows a timeline of the run by ante with money and
+score, the board before each step (blinds, jokers, consumables, hand, shop, packs, the remaining deck as
+counts, hand levels), the action and what it changed, and the reasoning and tool results as tables.
+Keys: `←`/`→` step, `Shift` jumps between decisions, `[`/`]` between blinds, `N` writes a note. Notes stay
+in your browser and can be exported. The page also opens a record dropped onto it, without the script.
+Run-history ideas (ante-by-ante stepping, notes on steps, files readable while the run is live) follow
+[Antelytics](https://thunderstore.io/c/balatro/p/Chrono/Antelytics/); no code is shared.
 
 ## Things worth knowing
 
@@ -116,9 +151,23 @@ BalatroLLM isn't on PyPI; the `llm` extra installs it from its v1.1.1 git tag (c
 - **The engine needs the game's exact LuaJIT (2.1.1700008891).** Seeded picks use `math.random`, which
   changed in later LuaJIT releases (Homebrew's 2.1.1794386141 diverged on half of 20 seeds). macOS uses
   the game's own library; elsewhere `scripts/setup.py luajit` builds that version.
-- **Two balatrobot requests can hang forever:** `pack` after a booster opened by a skip tag, and `buy`
-  of a Celestial pack whose first card is Black Hole. Both are fixed in the engine and in the real-game
-  mod copy (`engine/balatrobot_fixes.json`).
+- **Four balatrobot requests can hang forever:** `pack` after a booster opened by a skip tag, `buy`
+  of a Celestial pack whose first card is Black Hole, `pack` (taking a card) from such a pack, and
+  `sell` of Invisible Joker. All are fixed in the engine and in the real-game mod copy
+  (`engine/balatrobot_fixes.json`).
+- **balatrobot's game state includes face-down cards' identities** (flagged `state.hidden`).
+  BalatroLLM's prompt hides them; any other prompt or tool must too. The game itself counts face-down
+  hand cards as still in the deck, which is how the search and tools treat them.
+- **jackdaw v0.2.6 differs from the game in two cases found so far**, both when Ceremonial Dagger
+  destroys a joker at blind select (assisted Black/Gold runs; the real game was replayed to confirm):
+  - destroying a joker that changes hand size: jackdaw deals the first hand with the old size (Turtle
+    Bean: 14 cards instead of 9, seed `JDA01010`; Troubadour: 10 instead of 8, `JDA02028`; Merry Andy
+    under The Manacle: 6 instead of 7, `JDC04019`, not yet replayed on the real game);
+  - with Riff-raff: the game frees the destroyed joker before Riff-raff creates its jokers, so it can
+    create the same joker again (Abstract Joker on seed `JDA02034`, in balatrobot's fast mode and at
+    normal speed); jackdaw still counts it as owned and draws a different one (Mail-In Rebate).
+
+  Everything else matched; see the validation table.
 - **Text fields differ by design** between the real game (localized descriptions) and jackdaw (names);
   comparisons skip them. An LLM agent on jackdaw needs its own descriptions.
 
@@ -129,8 +178,8 @@ This project builds directly on:
 - **[Balatro](https://store.steampowered.com/app/2379780/Balatro/)** by LocalThunk, published by Playstack. The engine runs
   the game's own code from your copy; none of it is in this repository.
 - **[balatrobot](https://github.com/coder/balatrobot)** (Coder; S1M0N38 and contributors, MIT). Its
-  JSON-RPC endpoints and gamestate view run unmodified inside the engine. Two request-completion
-  fixes are listed in `engine/balatrobot_fixes.json`.
+  JSON-RPC endpoints and gamestate view run inside the engine, with four request-completion fixes
+  (`engine/balatrobot_fixes.json`).
 - **[jackdaw](https://github.com/TylerFlar/jackdaw-balatro)** (TylerFlar and contributors, MIT): the
   fast simulator behind `balatro_bot/sim/`, the game servers and the analysis tools. The comparison
   scripts and baselines use its own `SmartPolicy`, `RandomPolicy` and `smart_agent`. The search player

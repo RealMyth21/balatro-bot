@@ -84,6 +84,9 @@ def main() -> None:
                 if a2 is None:
                     a2, b2 = fast.call("gamestate"), slow.call("gamestate")
             a, b = a2, b2
+        else:  # the action cap was reached: compare the state after the last action too
+            n = args.max_actions
+            diff = first_diff(normalize(a), normalize(b), labels=("fast", "slow"))
         total += n
         if diff:
             print(f"{seed}: MISMATCH after {n} actions -> {diff}")

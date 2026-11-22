@@ -32,7 +32,7 @@ def test_parallel_jackdaw_servers_play_independent_identical_games():
         r = rpc(port, "play", {"cards": [0, 1, 2, 3, 4]})["result"]
         return [c["key"] for c in r["hand"]["cards"]], r["round"]["chips"]
 
-    with ServerPool("jackdaw", n=3, base_port=13500) as pool:
+    with ServerPool("jackdaw", n=3) as pool:
         assert len(set(pool.ports)) == 3
         with ThreadPoolExecutor(3) as ex:
             results = list(ex.map(game, pool.ports))
@@ -62,14 +62,14 @@ def test_tools_refuse_when_the_shadow_drifts():
     sh, view = _shadow_at_first_hand()
     drifted = dict(view, money=view["money"] + 100)
     out = json.loads(run_tool(sh, drifted, "score_plays", {}))
-    assert "shadow drifted on money" in out["error"]
+    assert "shadow drifted: $.money: game=104 shadow=4" in out["error"]
 
 
 def test_tools_only_answer_during_a_hand():
     sh = Shadow()
     sh.apply("start", {"deck": "BLACK", "stake": "GOLD", "seed": "TESTSEED"})
     out = json.loads(run_tool(sh, sh.sim.view(), "score_plays", {}))
-    assert "only work while choosing" in out["error"]
+    assert "only works while choosing" in out["error"]
 
 
 def test_sampled_worlds_hide_the_future_but_keep_the_present():

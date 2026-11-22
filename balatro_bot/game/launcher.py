@@ -70,20 +70,24 @@ class BalatroInstance:
             BOT_PROFILE=str(self.cfg.profile),
         )
         env.update(self.cfg.extra_env)
-        log = open(self.log_path, "w")
-        self.proc = subprocess.Popen(
-            [str(LOVE_PATH), "--mod-dir", str(MOD_DIR)],
-            cwd=str(GAME_DIR),
-            env=env,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+        with open(self.log_path, "w") as log:  # the game keeps its own handle
+            self.proc = subprocess.Popen(
+                [str(LOVE_PATH), "--mod-dir", str(MOD_DIR)],
+                cwd=str(GAME_DIR),
+                env=env,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self.proc.poll() is not None:
                 raise RuntimeError(f"Balatro exited early (code {self.proc.returncode}); see {self.log_path}")
             if _healthy(self.cfg.port):
+                owner = _listening_pid(self.cfg.port)
+                if owner is not None and owner != self.proc.pid:
+                    self.stop()
+                    raise RuntimeError(f"port {self.cfg.port} is served by another process (pid {owner})")
                 return
             time.sleep(0.25)
         self.stop()
@@ -121,12 +125,14 @@ class InstancePool:
             shutil.copy2(f, helper / f.name)
         shutil.copy2(PROJECT_ROOT / "engine/lua/determinism.lua", helper / "determinism.lua")
         settings = SAVE_DIR / "settings.jkr"
-        if settings.exists():
+        # A backup left by an interrupted run is the user's original (that run never restored it), so
+        # it is kept rather than overwritten with the bot-modified settings.
+        if not self._settings_backup.exists() and settings.exists():
             shutil.copy2(settings, self._settings_backup)
         try:
             for inst in self.instances:
                 inst.start()
-        except Exception:
+        except BaseException:  # incl. Ctrl-C during the boot
             self.__exit__(None, None, None)
             raise
         return self
@@ -136,6 +142,7 @@ class InstancePool:
             inst.stop()
         if self._settings_backup.exists():
             shutil.copy2(self._settings_backup, SAVE_DIR / "settings.jkr")
+            self._settings_backup.unlink()
 
     @property
     def ports(self) -> list[int]:
@@ -152,6 +159,16 @@ def _healthy(port: int) -> bool:
         return r.json().get("result", {}).get("status") == "ok"
     except Exception:
         return False
+
+
+def _listening_pid(port: int) -> int | None:
+    """PID listening on a local TCP port (via lsof), or None if unknown."""
+    try:
+        out = subprocess.run(["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"], capture_output=True,
+                             text=True, timeout=5).stdout.split()
+        return int(out[0]) if out else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
 
 
 def _port_free(port: int) -> bool:

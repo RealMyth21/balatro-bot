@@ -15,13 +15,12 @@ import argparse
 import json
 import random
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from balatro_bot.engine.client import EngineClient  # noqa: E402
-from balatro_bot.game.client import BalatroClient, RPCError  # noqa: E402
+from balatro_bot.game.client import BalatroClient, RPCError, settled  # noqa: E402
 from balatro_bot.game.launcher import InstancePool  # noqa: E402
 from balatro_bot.policies.mixed import MixedPolicy  # noqa: E402
 from balatro_bot.policies.random_policy import RandomPolicy  # noqa: E402
@@ -29,24 +28,10 @@ from balatro_bot.policies.scripted import ScriptedPolicy  # noqa: E402
 from balatro_bot.validation.diff import first_diff, normalize  # noqa: E402
 
 
-# Fields that legitimately differ between the two processes.
-def settled_real(client, result: dict, polls: int = 40, wait: float = 0.05) -> dict:
-    """Poll the real game until two consecutive snapshots match (animations finished)."""
-    prev = normalize(result)
-    for _ in range(polls):
-        time.sleep(wait)
-        cur_raw = client.gamestate()
-        cur = normalize(cur_raw)
-        if cur == prev:
-            return cur_raw
-        prev = cur
-    return cur_raw
-
-
 def step(client, method, params, settle=False):
     try:
         r = client.call(method, params)
-        return (settled_real(client, r) if settle else r), None
+        return (settled(client, r) if settle else r), None
     except RPCError as e:
         return None, e.name
 
@@ -54,7 +39,7 @@ def step(client, method, params, settle=False):
 def compare_seed(real, eng, seed: str, policy_factory, max_actions: int) -> tuple[int, str | None]:
     real.menu()
     eng.menu()
-    a = settled_real(real, real.start("BLACK", "GOLD", seed))
+    a = settled(real, real.start("BLACK", "GOLD", seed))
     b = eng.start("BLACK", "GOLD", seed)
     pol = policy_factory(seed)
     for n in range(max_actions):
@@ -76,7 +61,7 @@ def compare_seed(real, eng, seed: str, policy_factory, max_actions: int) -> tupl
             if a2 is None or b2 is None:
                 return n, f"could not recover from rejected {method}"
         a, b = a2, b2
-    return max_actions, None
+    return max_actions, first_diff(normalize(a), normalize(b), labels=("real", "engine"))  # after the last action
 
 
 def main() -> None:

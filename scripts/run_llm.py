@@ -9,7 +9,9 @@
 
 Games run on our exact engine by default (real description text for the prompt); --backend jackdaw
 uses the simulator (text fields are names only). Per-game summaries go to runtime/eval/llm.jsonl and
-full BalatroLLM logs to runtime/llm_runs/. Rerunning skips seeds already played under the same label.
+full BalatroLLM logs to runtime/llm_runs/. Rerunning skips seeds already finished under the same label,
+deck, stake and model, and retries seeds that stopped on an infrastructure error (API outage, dead
+server, budget stop); those are left out of the results until they finish.
 """
 
 from __future__ import annotations
@@ -36,7 +38,14 @@ def main() -> None:
     ap.add_argument("--model", default="kimi-k3.1-pro")
     ap.add_argument("--base-url", default=MOONSHOT_URL)
     ap.add_argument("--api-key-env", default="MOONSHOT_API_KEY", help="environment variable holding the key")
-    ap.add_argument("--tools", action="store_true", help="enable the analysis tools (exact scores, clear odds)")
+    ap.add_argument("--tools", action="store_true",
+                    help="enable the analysis tools (exact scores, clear odds, shop/pack option evaluation)")
+    ap.add_argument("--option-worlds", type=int, default=12, help="evaluate_options: imagined futures per option")
+    ap.add_argument("--option-rollout", default="search", choices=["search", "smart"],
+                    help="evaluate_options: player that finishes each future (search: stronger; smart: ~10x faster)")
+    ap.add_argument("--option-weights", default=None,
+                    help="evaluate_options score weights: 8 numbers for reaching ante 2..8 and winning "
+                         "(default 1,2,4,8,16,32,64,128)")
     ap.add_argument("--backend", default="engine", choices=["engine", "jackdaw"])
     ap.add_argument("--parallel", type=int, default=4)
     ap.add_argument("--split", default="dev", choices=["dev", "heldout", "smoke"])
@@ -45,7 +54,8 @@ def main() -> None:
     ap.add_argument("--stake", default="GOLD")
     ap.add_argument("--strategy", default="default", help="BalatroLLM strategy name")
     ap.add_argument("--model-config", default="{}", help='JSON merged into BalatroLLM\'s request params')
-    ap.add_argument("--max-cost", type=float, default=float("inf"), help="stop starting new games after this USD")
+    ap.add_argument("--max-cost", type=float, default=float("inf"),
+                    help="USD cap for this label/deck/stake/model, earlier runs included; checked before every call")
     ap.add_argument("--price-in", type=float, default=2.0, help="USD per 1M input tokens")
     ap.add_argument("--price-out", type=float, default=10.0, help="USD per 1M output tokens")
     ap.add_argument("--price-cached", type=float, default=0.2, help="USD per 1M cached input tokens")
@@ -78,6 +88,17 @@ def main() -> None:
         if not api_key:
             sys.exit(f"set {args.api_key_env} in your shell (the key is read from the environment only)")
 
+    evaluator = None
+    if args.tools:  # the tools run on jackdaw (sim extra)
+        from balatro_bot.search.option_eval import OptionEvaluator, RunScore
+
+        scorer = RunScore()
+        if args.option_weights:
+            w = [float(x) for x in args.option_weights.split(",")]
+            if len(w) != 8:
+                sys.exit("--option-weights needs 8 numbers: reaching ante 2..8, then winning")
+            scorer = RunScore(reach_weights=tuple(w[:7]), win_weight=w[7])
+        evaluator = OptionEvaluator(worlds=args.option_worlds, rollout=args.option_rollout, scorer=scorer)
     seed_list = seeds(args.split, args.n)
     print(f"{label}: {len(seed_list)} {args.split} seeds, {args.parallel} parallel {args.backend} servers, "
           f"budget ${args.max_cost}")
@@ -91,17 +112,23 @@ def main() -> None:
                 prices=Prices(args.price_in, args.price_out, args.price_cached), max_cost=args.max_cost,
                 max_steps=args.max_steps, strip_cache_control=not args.keep_cache_control,
                 strategies_dir=Path(__file__).resolve().parents[1] / "strategies",
-                drop_params=tuple(args.drop_param)))
+                drop_params=tuple(args.drop_param), port_alive=pool.alive, option_evaluator=evaluator))
     finally:
         if mock_httpd:
             mock_httpd.shutdown()
-    print(f"\nplayed {out['played']} games, spent ${out['spent_usd']:.2f}"
-          + (" (stopped: budget reached)" if out["stopped_on_budget"] else ""))
+    print(f"\nplayed {out['played']} games, spent ${out['spent_usd']:.2f} (all runs of this label: "
+          f"${out['total_spent_usd']:.2f})" + (" (stopped: budget reached)" if out["stopped_on_budget"] else "")
+          + (f"; {out['servers_lost']} servers died (see runtime/logs/servers)" if out["servers_lost"] else ""))
     wanted = set(seed_list)
-    rows = [r for r in load(args.summary) if r["seed"] in wanted]
+    rows = [r for r in load(args.summary)
+            if r["seed"] in wanted and r.get("deck") == args.deck and r.get("stake") == args.stake]
+    models: dict[str, set] = {}
+    for r in rows:
+        models.setdefault(r["policy"], set()).add(r.get("model"))
     by: dict[str, list[dict]] = {}
     for r in rows:
-        by.setdefault(r["policy"], []).append(r)
+        key = r["policy"] if len(models[r["policy"]]) == 1 else f"{r['policy']} [{r.get('model')}]"
+        by.setdefault(key, []).append(r)
     for pol, rs in sorted(by.items()):
         print("  " + format_summary(pol, summarize(rs)))
     pols = sorted(by)

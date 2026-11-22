@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Balatro Game Viewer</title>
+<style>
+:root {
+  --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1f24; --muted: #6b6f78; --line: #e3e1da; --accent: #3a5bd9;
+  --llm: #3a5bd9; --policy: #7a4fd0; --auto: #9aa0a8; --assist: #d08a2e; --err: #d1433a; --ok: #2e8b57;
+  --hearts: #d1433a; --diamonds: #d9822b; --clubs: #2a6f97; --spades: #2b2f36; --chip: #f2f0ea;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171b; --panel: #1e2126; --ink: #e8e8ea; --muted: #9aa0a8; --line: #2d3138; --accent: #7d97ff;
+    --llm: #7d97ff; --policy: #b08cff; --auto: #6b7078; --spades: #d6d9de; --clubs: #5fb0d8; --chip: #262a30;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171b; --panel: #1e2126; --ink: #e8e8ea; --muted: #9aa0a8; --line: #2d3138; --accent: #7d97ff;
+  --llm: #7d97ff; --policy: #b08cff; --auto: #6b7078; --spades: #d6d9de; --clubs: #5fb0d8; --chip: #262a30;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
+header h1 { font-size: 16px; margin: 0; font-weight: 650; }
+header .meta { color: var(--muted); font-size: 13px; }
+header .spacer { flex: 1; }
+button, select, label.btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+button:hover, label.btn:hover { border-color: var(--accent); }
+button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.badge { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); background: var(--chip); }
+.badge.won { color: #fff; background: var(--ok); border-color: var(--ok); }
+.badge.lost { color: #fff; background: var(--err); border-color: var(--err); }
+.badge.llm { color: #fff; background: var(--llm); border-color: var(--llm); }
+.badge.policy { color: #fff; background: var(--policy); border-color: var(--policy); }
+.badge.auto { color: #fff; background: var(--auto); border-color: var(--auto); }
+.badge.assist { color: #fff; background: var(--assist); border-color: var(--assist); }
+#drop { display: grid; place-items: center; min-height: 70vh; padding: 16px; }
+#drop .box { max-width: 560px; text-align: center; border: 2px dashed var(--line); border-radius: 16px; padding: 32px; background: var(--panel); }
+#drop .box p { color: var(--muted); }
+#recordList { text-align: left; margin-top: 16px; max-height: 40vh; overflow: auto; }
+#recordList a { display: block; padding: 4px 0; color: var(--accent); text-decoration: none; font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+main { display: none; padding: 12px 16px 40px; gap: 14px; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); }
+main.show { display: grid; }
+@media (max-width: 980px) { main.show { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+.panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; font-weight: 650; }
+.panel h3 { font-size: 13px; margin: 12px 0 6px; color: var(--muted); font-weight: 600; }
+#timelineWrap { grid-column: 1 / -1; }
+#chart { width: 100%; height: 70px; display: block; cursor: pointer; }
+#ticks { display: flex; gap: 2px; align-items: flex-end; overflow-x: auto; padding: 6px 0 4px; }
+.ante { display: flex; flex-direction: column; gap: 3px; padding: 0 4px; border-left: 1px solid var(--line); }
+.ante:first-child { border-left: 0; }
+.ante .lbl { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.ante .row { display: flex; gap: 1px; }
+.tick { width: 6px; height: 18px; border-radius: 2px; background: var(--auto); cursor: pointer; flex: none; opacity: .75; position: relative; }
+.tick.llm { background: var(--llm); } .tick.policy { background: var(--policy); } .tick.assist { background: var(--assist); }
+.tick.err { background: var(--err); } .tick.cur { outline: 2px solid var(--ink); opacity: 1; height: 22px; }
+.tick.hasnote::after { content: ""; position: absolute; top: -5px; left: 1px; width: 4px; height: 4px; border-radius: 50%; background: var(--assist); }
+#nav { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+#nav .pos { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-left: 6px; }
+.kv { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.kv div { font-size: 13px; } .kv b { font-variant-numeric: tabular-nums; }
+.bar { height: 8px; background: var(--chip); border-radius: 4px; overflow: hidden; border: 1px solid var(--line); margin-top: 6px; }
+.bar > span { display: block; height: 100%; background: var(--accent); }
+.blinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.blind { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
+.blind.CURRENT, .blind.SELECT { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.blind.DEFEATED, .blind.SKIPPED { opacity: .55; }
+.blind .nm { font-weight: 650; font-size: 13px; }
+.blind .ef { color: var(--muted); }
+.cards { display: flex; flex-wrap: wrap; gap: 6px; }
+.card { width: 54px; min-height: 74px; border: 1px solid var(--line); border-radius: 7px; background: var(--chip); display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; padding: 4px 2px; font-weight: 700; }
+.card .rk { font-size: 18px; line-height: 1; }
+.card .st { font-size: 18px; line-height: 1.1; }
+.card .ix { position: absolute; top: 2px; left: 4px; font-size: 10px; color: var(--muted); font-weight: 500; }
+.card .mods { font-size: 9px; font-weight: 600; text-align: center; color: var(--muted); line-height: 1.15; margin-top: 2px; }
+.card.H { color: var(--hearts); } .card.D { color: var(--diamonds); } .card.C { color: var(--clubs); } .card.S { color: var(--spades); }
+.card.hidden { color: var(--muted); background: repeating-linear-gradient(45deg, var(--chip), var(--chip) 5px, var(--line) 5px, var(--line) 10px); }
+.card.debuff { opacity: .45; text-decoration: line-through; }
+.card.sel { outline: 3px solid var(--accent); outline-offset: 1px; }
+.card.forced { box-shadow: 0 0 0 2px var(--assist); }
+.card.FOIL { box-shadow: inset 0 0 0 2px #8fb4d9; } .card.HOLO { box-shadow: inset 0 0 0 2px #d98fc6; }
+.card.POLYCHROME { box-shadow: inset 0 0 0 2px #e0b440; } .card.NEGATIVE { box-shadow: inset 0 0 0 2px #444; }
+.items { display: flex; flex-wrap: wrap; gap: 6px; }
+.item { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 12px; max-width: 220px; background: var(--chip); position: relative; }
+.item .nm { font-weight: 650; font-size: 13px; padding-right: 18px; }
+.item .ef { color: var(--muted); margin-top: 2px; }
+.item .ix { position: absolute; top: 4px; right: 6px; font-size: 10px; color: var(--muted); }
+.item.sel { outline: 3px solid var(--accent); }
+.item .tags { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 3px; }
+.item .tags span { font-size: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--panel); color: var(--ink); }
+.empty { color: var(--muted); font-size: 12px; font-style: italic; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; }
+tr.best td { font-weight: 650; }
+.deckgrid td, .deckgrid th { text-align: center; padding: 2px 3px; }
+.deckgrid td.z { color: var(--line); }
+.action { font-size: 15px; font-weight: 650; margin: 4px 0 6px; }
+.delta { font-size: 13px; color: var(--muted); }
+.delta b.up { color: var(--ok); } .delta b.down { color: var(--err); }
+.reason { white-space: pre-wrap; font-size: 13px; background: var(--chip); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-height: 320px; overflow: auto; }
+details.tool { border: 1px solid var(--line); border-radius: 8px; margin: 6px 0; background: var(--panel); }
+details.tool > summary { cursor: pointer; padding: 6px 10px; font-weight: 600; font-size: 13px; }
+details.tool > div { padding: 0 10px 10px; overflow-x: auto; }
+pre.json { font-family: var(--mono); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; max-height: 300px; overflow: auto; }
+.err { color: var(--err); font-weight: 600; }
+textarea { width: 100%; min-height: 64px; font: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--chip); color: var(--ink); }
+.muted { color: var(--muted); } .small { font-size: 12px; }
+.help { font-size: 12px; color: var(--muted); }
+kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--chip); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Balatro Game Viewer</h1>
+  <span class="meta" id="title"></span>
+  <span id="result"></span>
+  <span class="spacer"></span>
+  <button id="themeBtn" title="Switch theme">◐</button>
+  <label class="btn">Open record<input type="file" id="file" accept=".jsonl,.gz,.json" hidden></label>
+</header>
+
+<div id="drop">
+  <div class="box">
+    <h2 style="margin-top:0">Open a game record</h2>
+    <p>Drop a <code>record.jsonl</code> here or use <b>Open record</b>. Records are written by the LLM runner
+      (<code>runtime/llm_runs/…/record.jsonl</code>) and by <code>scripts/record_game.py</code>
+      (<code>runtime/records/</code>). <code>scripts/view_record.py</code> serves this page with a list of your records.</p>
+    <div id="recordList"></div>
+  </div>
+</div>
+
+<main id="app">
+  <section class="panel" id="timelineWrap">
+    <svg id="chart" preserveAspectRatio="none" aria-label="Money over the game"></svg>
+    <div id="ticks"></div>
+    <div id="nav">
+      <button data-go="first" title="First step (Home)">⏮</button>
+      <button data-go="prevDecision" title="Previous decision (Shift+←)">⇤</button>
+      <button data-go="prev" title="Previous step (←)">◀</button>
+      <button data-go="next" title="Next step (→)">▶</button>
+      <button data-go="nextDecision" title="Next decision (Shift+→)">⇥</button>
+      <button data-go="last" title="Last step (End)">⏭</button>
+      <button id="decOnly" title="Only stop on decisions (D)">Decisions only</button>
+      <span class="pos" id="pos"></span>
+      <span class="spacer"></span>
+      <span class="help"><kbd>←</kbd><kbd>→</kbd> step · <kbd>Shift</kbd> decision · <kbd>[</kbd><kbd>]</kbd> blind · <kbd>N</kbd> note</span>
+    </div>
+  </section>
+
+  <section class="panel" id="board"></section>
+
+  <section class="panel" id="side">
+    <div id="decision"></div>
+    <h3>Your notes on this step</h3>
+    <textarea id="note" placeholder="Notes are saved in this browser for this record."></textarea>
+    <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap">
+      <button id="exportNotes">Export notes</button>
+      <label class="btn">Import notes<input type="file" id="importNotes" accept=".json" hidden></label>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const SUIT = { H: "♥", D: "♦", C: "♣", S: "♠" };
+const RANK = { T: "10" };
+const fmt = (n) => (n == null ? "–" : typeof n === "number" ? (Math.abs(n) >= 1e6 ? n.toExponential(2) : Math.round(n * 100) / 100).toLocaleString() : n);
+const pct = (p) => (p == null ? "–" : (100 * p).toFixed(p >= 0.995 || p < 0.005 ? 0 : 1) + "%");
+
+let REC = null;      // {header, steps, notes, end}
+let cur = 0;
+let decisionsOnly = false;
+let userNotes = {};
+
+// ---------- theme ----------
+(function () {
+  let t = null;
+  try { t = localStorage.getItem("bv-theme"); } catch (e) {}
+  if (t) document.documentElement.dataset.theme = t;
+  $("#themeBtn").onclick = () => {
+    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const now = document.documentElement.dataset.theme || (dark ? "dark" : "light");
+    const next = now === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("bv-theme", next); } catch (e) {}
+  };
+})();
+
+// ---------- loading ----------
+async function readFile(file) {
+  if (file.name.endsWith(".gz")) {
+    const ds = new DecompressionStream("gzip");
+    return await new Response(file.stream().pipeThrough(ds)).text();
+  }
+  return await file.text();
+}
+function parse(text) {
+  const rec = { header: {}, steps: [], notes: [], end: null };
+  for (const line of text.split("\n")) {
+    if (!line.trim()) continue;
+    let o;
+    try { o = JSON.parse(line); } catch (e) { continue; }   // a line still being written
+    if (o.type === "header") rec.header = o;
+    else if (o.type === "step") rec.steps.push(o);
+    else if (o.type === "note") rec.notes.push(o);
+    else if (o.type === "state") rec.start = o.state;
+    else if (o.type === "end") rec.end = o;
+  }
+  // the state each step acted on: the previous step's result
+  let prev = rec.start || null;
+  for (const s of rec.steps) {
+    s.before = prev;
+    if (s.result) prev = s.result;
+  }
+  rec.notesByStep = {};
+  for (const n of rec.notes) (rec.notesByStep[n.after_step] ||= []).push(n);
+  rec.id = `${rec.header.seed || "?"}|${rec.header.started || ""}|${(rec.header.player || {}).label || ""}`;
+  return rec;
+}
+function show(rec) {
+  REC = rec;
+  try { userNotes = JSON.parse(localStorage.getItem("bv-notes:" + rec.id) || "{}"); } catch (e) { userNotes = {}; }
+  $("#drop").style.display = "none";
+  $("#app").classList.add("show");
+  const h = rec.header, p = h.player || {};
+  $("#title").textContent = `${h.seed || "?"} · ${h.deck || "?"} / ${h.stake || "?"} · ${p.kind === "llm" ? (p.model || "LLM") + (p.tools ? " + tools" : "") : (p.label || "policy")}` +
+    (p.assist_money || p.assist_chips ? " · assisted" : "") + (h.backend ? ` · ${h.backend}` : "");
+  const e = rec.end;
+  $("#result").innerHTML = e ? (e.won ? `<span class="badge won">Won · cleared ante 8</span>` : `<span class="badge lost">Lost · ante ${e.ante ?? "?"}</span>`) +
+      (e.error ? ` <span class="badge" title="${esc(e.error)}">${esc(e.error_kind || "error")}</span>` : "") +
+      (e.cost_usd ? ` <span class="badge">$${e.cost_usd.toFixed(3)}</span>` : "") + ` <span class="badge">${fmt(e.seconds)} s</span>`
+    : `<span class="badge">in progress</span>`;
+  cur = Math.min(firstPlayable(), rec.steps.length - 1);
+  drawTimeline();
+  render();
+}
+function firstPlayable() {
+  const i = REC.steps.findIndex((s) => s.method !== "menu" && s.method !== "start");
+  return i < 0 ? 0 : i;
+}
+$("#file").onchange = async (ev) => { const f = ev.target.files[0]; if (f) show(parse(await readFile(f))); };
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) show(parse(await readFile(f))); });
+(async function boot() {
+  const q = new URLSearchParams(location.search);
+  if (q.get("record")) {
+    const r = await fetch(q.get("record"));
+    if (r.ok) return show(parse(await r.text()));
+  }
+  try {   // list of records written by scripts/view_record.py
+    const r = await fetch("records.json");
+    if (r.ok) {
+      const list = await r.json();
+      $("#recordList").innerHTML = list.length ? "<b>Your records</b>" + list.map((x) =>
+        `<a href="?record=${encodeURIComponent(x.url)}">${esc(x.name)}</a>`).join("") : "";
+    }
+  } catch (e) {}
+})();
+
+// ---------- timeline ----------
+const isDecision = (s) => s.actor === "llm" || s.actor === "policy";
+function blindKey(st) {
+  if (!st) return "";
+  const b = Object.values(st.blinds || {}).find((x) => x.status === "CURRENT");
+  return `${st.ante_num}:${b ? b.type : st.state}`;
+}
+function drawTimeline() {
+  const steps = REC.steps;
+  const groups = [];
+  for (const [i, s] of steps.entries()) {
+    const st = s.result || s.before || {};
+    const a = st.ante_num ?? "?";
+    if (!groups.length || groups[groups.length - 1].ante !== a) groups.push({ ante: a, idx: [] });
+    groups[groups.length - 1].idx.push(i);
+  }
+  $("#ticks").innerHTML = groups.map((g) => `<div class="ante"><div class="lbl">Ante ${g.ante}</div><div class="row">` +
+    g.idx.map((i) => {
+      const s = steps[i];
+      const cls = ["tick", s.actor, s.error ? "err" : "", (userNotes[i] || REC.notesByStep[i]) ? "hasnote" : ""].join(" ");
+      return `<div class="${cls}" data-i="${i}" title="${i}: ${esc(s.actor)} ${esc(s.method)}"></div>`;
+    }).join("") + "</div></div>").join("");
+  $("#ticks").onclick = (e) => { const t = e.target.closest(".tick"); if (t) { cur = +t.dataset.i; render(); } };
+  drawChart();
+}
+function drawChart() {
+  const svg = $("#chart"), steps = REC.steps, n = Math.max(1, steps.length - 1);
+  const W = 1000, H = 70;
+  const money = steps.map((s) => (s.result || s.before || {}).money ?? 0);
+  const maxM = Math.max(10, ...money);
+  const prog = steps.map((s) => {
+    const st = s.result || s.before || {};
+    const b = Object.values(st.blinds || {}).find((x) => x.status === "CURRENT");
+    return b && b.score ? Math.min(1, ((st.round || {}).chips || 0) / b.score) : null;
+  });
+  const x = (i) => (i / n) * W;
+  const mPath = money.map((m, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${(H - 4 - (m / maxM) * (H - 10)).toFixed(1)}`).join("");
+  let pPath = "";
+  prog.forEach((p, i) => { if (p != null) pPath += `M${x(i).toFixed(1)},${H}L${x(i).toFixed(1)},${(H - p * (H - 6)).toFixed(1)}`; });
+  let antes = "";
+  steps.forEach((s, i) => {
+    if (i && (s.result || {}).ante_num !== (steps[i - 1].result || {}).ante_num && (s.result || {}).ante_num)
+      antes += `<line x1="${x(i)}" x2="${x(i)}" y1="0" y2="${H}" stroke="var(--line)" stroke-width="2"/>`;
+  });
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = `${antes}<path d="${pPath}" stroke="var(--accent)" stroke-opacity=".25" stroke-width="3"/>` +
+    `<path d="${mPath}" fill="none" stroke="var(--ok)" stroke-width="2" vector-effect="non-scaling-stroke"/>` +
+    `<line id="curLine" x1="${x(cur)}" x2="${x(cur)}" y1="0" y2="${H}" stroke="var(--ink)" stroke-width="2" vector-effect="non-scaling-stroke"/>` +
+    `<text x="4" y="12" font-size="11" fill="var(--muted)">money (green, max $${maxM}) · score toward blind (blue)</text>`;
+  svg.onclick = (e) => {
+    const r = svg.getBoundingClientRect();
+    cur = Math.round(((e.clientX - r.left) / r.width) * n);
+    render();
+  };
+}
+
+// ---------- navigation ----------
+function go(where) {
+  const steps = REC.steps, N = steps.length;
+  const ok = (i) => !decisionsOnly || isDecision(steps[i]);
+  const find = (from, dir, pred) => { for (let i = from; i >= 0 && i < N; i += dir) if (pred(i)) return i; return null; };
+  let t = null;
+  if (where === "first") t = find(0, 1, ok);
+  else if (where === "last") t = find(N - 1, -1, ok);
+  else if (where === "next") t = find(cur + 1, 1, ok);
+  else if (where === "prev") t = find(cur - 1, -1, ok);
+  else if (where === "nextDecision") t = find(cur + 1, 1, (i) => isDecision(steps[i]));
+  else if (where === "prevDecision") t = find(cur - 1, -1, (i) => isDecision(steps[i]));
+  else if (where === "nextBlind" || where === "prevBlind") {
+    const dir = where === "nextBlind" ? 1 : -1, k = blindKey(steps[cur].before);
+    t = find(cur + dir, dir, (i) => blindKey(steps[i].before) !== k && ok(i));
+    if (t != null && dir < 0) { const k2 = blindKey(steps[t].before); while (t > 0 && blindKey(steps[t - 1].before) === k2) t--; }
+  }
+  if (t != null) { cur = t; render(); }
+}
+$("#nav").onclick = (e) => { const b = e.target.closest("[data-go]"); if (b) go(b.dataset.go); };
+$("#decOnly").onclick = () => { decisionsOnly = !decisionsOnly; $("#decOnly").classList.toggle("on", decisionsOnly); };
+document.addEventListener("keydown", (e) => {
+  if (!REC || e.target.tagName === "TEXTAREA") return;
+  const k = e.key;
+  if (k === "ArrowRight") go(e.shiftKey ? "nextDecision" : "next");
+  else if (k === "ArrowLeft") go(e.shiftKey ? "prevDecision" : "prev");
+  else if (k === "]") go("nextBlind");
+  else if (k === "[") go("prevBlind");
+  else if (k === "Home") go("first");
+  else if (k === "End") go("last");
+  else if (k === "d" || k === "D") $("#decOnly").click();
+  else if (k === "n" || k === "N") { e.preventDefault(); $("#note").focus(); }
+  else return;
+  e.preventDefault();
+});
+
+// ---------- rendering the game ----------
+function cardHTML(c, i, opts = {}) {
+  const v = c.value || {}, m = Array.isArray(c.modifier) ? {} : (c.modifier || {}), st = Array.isArray(c.state) ? {} : (c.state || {});
+  const cls = ["card", v.suit || "", st.hidden && !opts.reveal ? "hidden" : "", st.debuff ? "debuff" : "", m.edition || "",
+    opts.sel ? "sel" : "", st.highlight && opts.inHand ? "forced" : ""].join(" ");
+  const mods = [m.enhancement && m.enhancement.toLowerCase(), m.seal && m.seal.toLowerCase() + " seal", m.edition && m.edition.toLowerCase()].filter(Boolean);
+  const stone = m.enhancement === "STONE";
+  const face = st.hidden && !opts.reveal ? `<span class="rk">?</span><span class="mods">face down</span>`
+    : stone ? `<span class="rk">▦</span><span class="mods">stone</span>`
+    : `<span class="rk">${esc(RANK[v.rank] || v.rank || "?")}</span><span class="st">${SUIT[v.suit] || ""}</span>` + (mods.length ? `<span class="mods">${esc(mods.join(" · "))}</span>` : "");
+  const tip = [c.label, v.effect, st.debuff && "debuffed", st.hidden && "face down", st.highlight && opts.inHand && "forced selection"].filter(Boolean).join(" — ");
+  return `<div class="${cls}" title="${esc(tip)}">${i != null ? `<span class="ix">${i}</span>` : ""}${face}</div>`;
+}
+function itemHTML(c, i, opts = {}) {
+  const v = c.value || {}, m = Array.isArray(c.modifier) ? {} : (c.modifier || {}), st = Array.isArray(c.state) ? {} : (c.state || {});
+  const tags = [];
+  if (m.edition) tags.push(m.edition.toLowerCase());
+  if (m.eternal) tags.push("eternal");
+  if (m.perishable) tags.push(`perishable ${m.perishable}`);
+  if (m.rental) tags.push("rental");
+  if (st.debuff) tags.push("debuffed");
+  if (opts.cost && c.cost) tags.push(`$${c.cost.buy}`);
+  if (opts.sell && c.cost) tags.push(`sells $${c.cost.sell}`);
+  const name = st.hidden ? "face down" : (c.label || c.key);
+  return `<div class="item${opts.sel ? " sel" : ""}" title="${esc(c.key)}"><span class="ix">${i}</span><div class="nm">${esc(name)}</div>` +
+    (v.effect && !st.hidden ? `<div class="ef">${esc(v.effect)}</div>` : "") +
+    (tags.length ? `<div class="tags">${tags.map((t) => `<span>${esc(t)}</span>`).join("")}</div>` : "") + "</div>";
+}
+const area = (st, k) => ((st || {})[k] || {}).cards || [];
+function selected(step, which) {
+  const p = step.params || {}, out = new Set();
+  const add = (x) => (Array.isArray(x) ? x : x == null ? [] : [x]).forEach((i) => out.add(i));
+  if (which === "hand" && ["play", "discard"].includes(step.method)) add(p.cards);
+  if (which === "hand" && ["use", "pack"].includes(step.method)) add(p.cards || p.targets);
+  if (which === "shop" && step.method === "buy") add(p.card);
+  if (which === "vouchers" && step.method === "buy") add(p.voucher);
+  if (which === "packs" && step.method === "buy") add(p.pack);
+  if (which === "jokers" && step.method === "sell") add(p.joker);
+  if (which === "consumables" && ["sell", "use"].includes(step.method)) add(p.consumable);
+  if (which === "pack" && step.method === "pack") add(p.card);
+  return out;
+}
+function deckTable(st) {
+  const cards = area(st, "cards");
+  if (!cards.length) return `<div class="empty">empty</div>`;
+  const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"], suits = ["S", "H", "C", "D"];
+  const n = {}; let other = 0;
+  for (const c of cards) {
+    const v = c.value || {}, m = Array.isArray(c.modifier) ? {} : (c.modifier || {});
+    if (m.enhancement === "STONE" || !v.rank) { other++; continue; }
+    n[v.suit + v.rank] = (n[v.suit + v.rank] || 0) + 1;
+  }
+  const rows = suits.map((s) => `<tr><th class="card ${s}" style="all:unset;color:var(--${{ S: "spades", H: "hearts", C: "clubs", D: "diamonds" }[s]})">${SUIT[s]}</th>` +
+    ranks.map((r) => `<td class="${n[s + r] ? "" : "z"}">${n[s + r] || "·"}</td>`).join("") +
+    `<td><b>${ranks.reduce((a, r) => a + (n[s + r] || 0), 0)}</b></td></tr>`).join("");
+  return `<table class="deckgrid"><tr><th></th>${ranks.map((r) => `<th>${RANK[r] || r}</th>`).join("")}<th>all</th></tr>${rows}</table>` +
+    `<div class="small muted">${cards.length} cards left${other ? ` (${other} stone)` : ""}; order not shown, as in the game's deck view</div>`;
+}
+function handLevels(st) {
+  const hs = Object.entries((st || {}).hands || {}).sort((a, b) => (a[1].order ?? 0) - (b[1].order ?? 0));
+  if (!hs.length) return "";
+  return `<table><tr><th>Hand</th><th>Lvl</th><th>Chips × Mult</th><th>Played</th></tr>` + hs.map(([k, h]) =>
+    `<tr${h.level > 1 ? ' class="best"' : ""}><td>${esc(k)}</td><td>${h.level}</td><td>${fmt(h.chips)} × ${fmt(h.mult)}</td><td>${h.played}${h.played_this_round ? ` (${h.played_this_round} now)` : ""}</td></tr>`).join("") + "</table>";
+}
+function renderBoard(step) {
+  const st = step.before || step.result || {};
+  const rnd = st.round || {};
+  const curB = Object.values(st.blinds || {}).find((b) => b.status === "CURRENT");
+  const target = curB ? curB.score : null;
+  const progress = target ? Math.min(100, (100 * (rnd.chips || 0)) / target) : 0;
+  const blinds = ["small", "big", "boss"].map((k) => (st.blinds || {})[k]).filter(Boolean).map((b) =>
+    `<div class="blind ${b.status}"><div class="nm">${esc(b.name)}</div><div>${fmt(b.score)} chips · <span class="muted">${esc(b.status.toLowerCase())}</span></div>` +
+    (b.effect ? `<div class="ef">${esc(b.effect)}</div>` : "") + (b.tag_name ? `<div class="ef">Skip: ${esc(b.tag_name)}</div>` : "") + "</div>").join("");
+  const sel = (w) => selected(step, w);
+  const list = (k, fn) => { const cs = area(st, k); return cs.length ? cs.map(fn).join("") : `<div class="empty">none</div>`; };
+  let html = `<h2>Game state before this step · ${esc(st.state || "?")}</h2>
+    <div class="kv"><div>Ante <b>${st.ante_num ?? "?"}</b></div><div>Round <b>${st.round_num ?? "?"}</b></div><div>Money <b>$${st.money ?? "?"}</b></div>
+      <div>Hands <b>${rnd.hands_left ?? "–"}</b></div><div>Discards <b>${rnd.discards_left ?? "–"}</b></div>
+      ${curB ? `<div>${esc(curB.name)}: <b>${fmt(rnd.chips || 0)}</b> / ${fmt(target)}</div>` : ""}</div>
+    ${curB ? `<div class="bar"><span style="width:${progress}%"></span></div>` : ""}
+    <h3>Blinds</h3><div class="blinds">${blinds || '<div class="empty">–</div>'}</div>
+    <h3>Jokers (${area(st, "jokers").length}/${(st.jokers || {}).limit ?? "?"})</h3><div class="items">${list("jokers", (c, i) => itemHTML(c, i, { sell: true, sel: sel("jokers").has(i) }))}</div>
+    <h3>Consumables (${area(st, "consumables").length}/${(st.consumables || {}).limit ?? "?"})</h3><div class="items">${list("consumables", (c, i) => itemHTML(c, i, { sel: sel("consumables").has(i) }))}</div>`;
+  if (area(st, "hand").length) html += `<h3>Hand (${area(st, "hand").length}/${(st.hand || {}).limit ?? "?"})</h3><div class="cards">${area(st, "hand").map((c, i) => cardHTML(c, i, { sel: sel("hand").has(i), inHand: true })).join("")}</div>`;
+  if (st.state === "SHOP") {
+    html += `<h3>Shop · reroll $${rnd.reroll_cost ?? "?"}</h3><div class="items">${list("shop", (c, i) => itemHTML(c, i, { cost: true, sel: sel("shop").has(i) }))}</div>
+      <h3>Vouchers</h3><div class="items">${list("vouchers", (c, i) => itemHTML(c, i, { cost: true, sel: sel("vouchers").has(i) }))}</div>
+      <h3>Packs</h3><div class="items">${list("packs", (c, i) => itemHTML(c, i, { cost: true, sel: sel("packs").has(i) }))}</div>`;
+  }
+  if (area(st, "pack").length) html += `<h3>Open pack</h3><div class="items">${area(st, "pack").map((c, i) => (c.value || {}).rank ? cardHTML(c, i, { sel: sel("pack").has(i), reveal: true }) : itemHTML(c, i, { sel: sel("pack").has(i) })).join("")}</div>`;
+  const vouchers = Object.keys(st.used_vouchers || {});
+  if (vouchers.length) html += `<h3>Vouchers redeemed</h3><div class="small">${vouchers.map(esc).join(", ")}</div>`;
+  html += `<details style="margin-top:12px"><summary><b>Deck</b> <span class="muted small">(cards left to draw)</span></summary>${deckTable(st)}</details>
+    <details style="margin-top:8px"><summary><b>Hand levels</b></summary>${handLevels(st)}</details>`;
+  $("#board").innerHTML = html;
+}
+
+// ---------- rendering the decision ----------
+function describe(step) {
+  const st = step.before || {}, p = step.params || {};
+  const names = (k, idx) => (Array.isArray(idx) ? idx : [idx]).map((i) => {
+    const c = area(st, k)[i];
+    if (!c) return `#${i}`;
+    const v = c.value || {};
+    return k === "hand" && v.rank ? `${RANK[v.rank] || v.rank}${SUIT[v.suit] || ""}` : (c.label || c.key);
+  }).join(", ");
+  switch (step.method) {
+    case "play": return `Play ${names("hand", p.cards)}`;
+    case "discard": return `Discard ${names("hand", p.cards)}`;
+    case "buy": return p.card != null ? `Buy ${names("shop", p.card)}` : p.voucher != null ? `Redeem ${names("vouchers", p.voucher)}` : `Buy pack ${names("packs", p.pack)}`;
+    case "sell": return p.joker != null ? `Sell ${names("jokers", p.joker)}` : `Sell ${names("consumables", p.consumable)}`;
+    case "use": return `Use ${names("consumables", p.consumable)}` + (p.cards ? ` on ${names("hand", p.cards)}` : "");
+    case "pack": return p.skip ? "Skip the pack" : `Take ${names("pack", p.card)}` + (p.targets ? ` on ${names("hand", p.targets)}` : "");
+    case "reroll": return "Reroll the shop";
+    case "next_round": return "Leave the shop";
+    case "cash_out": return "Cash out";
+    case "select": return "Play the blind";
+    case "skip": return "Skip the blind";
+    case "set": return `Assist: set ${Object.entries(p).map(([k, v]) => `${k} = ${v}`).join(", ")}`;
+    case "start": return `Start run (${p.deck} / ${p.stake}, seed ${p.seed})`;
+    case "rearrange": return "Rearrange " + Object.keys(p).join(", ");
+    default: return `${step.method} ${JSON.stringify(p)}`;
+  }
+}
+function deltas(step) {
+  const a = step.before || {}, b = step.result;
+  if (!b) return "";
+  const out = [];
+  const d = (x, y, label, money) => {
+    if (x == null || y == null || x === y) return;
+    const up = y > x;
+    out.push(`${label} <b class="${up ? "up" : "down"}">${up ? "+" : "−"}${money ? "$" : ""}${fmt(Math.abs(y - x))}</b>`);
+  };
+  if (step.method === "play" && (a.round || {}).chips != null && (b.round || {}).chips != null && b.state === "SELECTING_HAND") d(a.round.chips, b.round.chips, "score", false);
+  if (step.method === "play" && b.state !== "SELECTING_HAND") out.push(`→ ${esc(b.state)}`);
+  d(a.money, b.money, "money", true);
+  if (a.state !== b.state && step.method !== "play") out.push(`→ ${esc(b.state)}`);
+  if (a.ante_num !== b.ante_num && b.ante_num) out.push(`ante ${b.ante_num}`);
+  return out.join(" · ");
+}
+function toolHTML(t, step) {
+  const r = t.result || {};
+  let body = "";
+  if (r.error) body = `<div class="err">${esc(r.error)}</div>`;
+  else if (t.name === "score_plays" && r.plays) {
+    body = `<div class="small muted">need ${fmt(r.chips_needed)} more · ${r.hands_left} hands, ${r.discards_left} discards${r.face_down_cards ? ` · face down: ${r.face_down_cards}` : ""}${r.forced_card != null ? ` · forced card ${r.forced_card}` : ""}</div>` +
+      `<table><tr><th>Cards</th><th>Hand</th><th>Min</th><th>Max</th></tr>` + r.plays.map((p, i) =>
+        `<tr${i === 0 ? ' class="best"' : ""}><td>${esc(p.cards.join(", "))}</td><td>${esc(p.hand)}</td><td>${fmt(p.min_score)}</td><td>${fmt(p.max_score)}</td></tr>`).join("") + "</table>" +
+      (r.note ? `<div class="small muted">${esc(r.note)}</div>` : "");
+  } else if ((t.name === "estimate_clear_chance" || t.name === "round_search") && r.results) {
+    const label = (x) => x.action || (x.play ? "play " + x.play.join(", ") : x.discard ? "discard " + x.discard.join(", ") : "?");
+    const p = (step && step.params) || {};
+    const chosen = step && ["play", "discard"].includes(step.method) && p.cards
+      ? (t.name === "round_search" ? `${step.method === "play" ? "PlayHand" : "Discard"}(${p.cards.join(", ")})` : `${step.method} ${p.cards.join(", ")}`) : null;
+    const rows = [...r.results].sort((a, b) => (b.clear_chance ?? -1) - (a.clear_chance ?? -1) || (b.mean_progress ?? -1) - (a.mean_progress ?? -1));
+    body = `<table><tr><th>Candidate</th><th>Clear chance</th><th>Progress</th></tr>` + rows.map((x) =>
+      `<tr${label(x) === chosen ? ' class="best"' : ""}><td>${esc(label(x))}${label(x) === chosen ? ' <span class="badge">chosen</span>' : ""}</td>` +
+      `<td>${x.error ? `<span class="err">${esc(x.error)}</span>` : pct(x.clear_chance)}</td><td>${x.mean_progress == null ? "" : pct(x.mean_progress)}</td></tr>`).join("") + "</table>" +
+      `<div class="small muted">${r.worlds ? r.worlds + " sampled futures · " : ""}sorted by clear chance; the chosen action is marked</div>`;
+  } else if (t.name === "evaluate_options" && r.options) {
+    const ok = r.options.filter((o) => o.score != null);
+    const antes = ["2", "3", "4", "5", "6", "7", "8"].filter((a) => ok.some((o) => ((o.reach_ante || {})[a] || 0) > 0));
+    const plan = (o) => (o.steps || []).map((st) => {
+      const [m, v] = Object.entries(st)[0] || ["?", {}];
+      return describe({ method: m, params: v || {}, before: step ? step.before : null });
+    }).join(" → ") || "?";
+    body = `<table><tr><th>Plan</th><th>Score</th>${antes.map((a) => `<th>reach ${a}</th>`).join("")}<th>win</th><th>mean ante</th></tr>` + r.options.map((o, i) =>
+      `<tr${i === 0 && o.score != null ? ' class="best"' : ""}><td>${esc(plan(o))}</td>` +
+      (o.error ? `<td colspan="${antes.length + 3}" class="err">${esc(o.error)}</td>` :
+        `<td>${fmt(o.score)}<span class="muted small"> ±${fmt(o.score_stderr)}</span></td>${antes.map((a) => `<td>${pct((o.reach_ante || {})[a])}</td>`).join("")}<td>${pct(o.win_chance)}</td><td>${fmt(o.mean_ante)}</td>`) + "</tr>").join("") + "</table>" +
+      `<div class="small muted">${r.worlds} futures per plan, finished by the ${esc(r.rollout)} player · ranked by score (later antes weigh more) · antes no plan reaches are hidden</div>`;
+  } else body = `<pre class="json">${esc(JSON.stringify(r, null, 2))}</pre>`;
+  const args = t.arguments && Object.keys(t.arguments).length ? `<div class="small muted">arguments: <code>${esc(JSON.stringify(t.arguments))}</code></div>` : "";
+  return `<details class="tool" open><summary>${esc(t.name)}${t.seconds != null ? ` <span class="muted small">${fmt(t.seconds)} s</span>` : ""}</summary><div>${args}${body}</div></details>`;
+}
+function renderDecision(step) {
+  const d = step.decision;
+  let html = `<h2>Step ${step.i + 1} of ${REC.steps.length}</h2>
+    <div><span class="badge ${esc(step.actor)}">${esc(step.actor === "llm" ? "model decision" : step.actor === "policy" ? "policy decision" : step.actor)}</span>
+      <span class="muted small">t = ${fmt(step.t)} s${step.seconds != null ? ` · game took ${fmt(step.seconds)} s` : ""}</span></div>
+    <div class="action">${esc(describe(step))}</div>
+    <div class="delta">${deltas(step)}</div>`;
+  if (step.error) html += `<div class="err">Refused: ${esc(step.error.name)} — ${esc(step.error.message)}</div>`;
+  if (d) {
+    const reasons = [...(d.reasoning || [])];
+    if (d.action_reasoning) reasons.push(d.action_reasoning);
+    if (reasons.length) html += `<h3>Reasoning</h3><div class="reason">${esc(reasons.join("\n\n"))}</div>`;
+    if ((d.tool_calls || []).length) html += `<h3>Analysis (${d.tool_calls.length})</h3>` + d.tool_calls.map((t) => toolHTML(t, step)).join("");
+    const usage = [];
+    if (d.model_calls) usage.push(`${d.model_calls} model call${d.model_calls > 1 ? "s" : ""}`);
+    if (d.tokens && d.tokens.prompt) usage.push(`${fmt(d.tokens.prompt)} in / ${fmt(d.tokens.completion)} out tokens${d.tokens.cached ? ` (${fmt(d.tokens.cached)} cached)` : ""}`);
+    if (d.cost_usd) usage.push(`$${d.cost_usd.toFixed(4)}`);
+    if (d.seconds) usage.push(`${fmt(d.seconds)} s thinking`);
+    if (usage.length) html += `<div class="small muted" style="margin-top:8px">${usage.join(" · ")}</div>`;
+  }
+  for (const n of REC.notesByStep[step.i] || []) {
+    html += `<h3>After this step</h3><div class="err">${esc(n.text)}</div>`;
+    if (n.decision && (n.decision.reasoning || []).length) html += `<div class="reason">${esc(n.decision.reasoning.join("\n\n"))}</div>`;
+  }
+  $("#decision").innerHTML = html;
+}
+function render() {
+  const steps = REC.steps;
+  if (!steps.length) return;
+  cur = Math.max(0, Math.min(cur, steps.length - 1));
+  const step = steps[cur];
+  renderBoard(step);
+  renderDecision(step);
+  document.querySelectorAll(".tick.cur").forEach((t) => t.classList.remove("cur"));
+  const tick = document.querySelector(`.tick[data-i="${cur}"]`);
+  if (tick) { tick.classList.add("cur"); tick.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+  const line = document.getElementById("curLine");
+  if (line) { const x = (cur / Math.max(1, steps.length - 1)) * 1000; line.setAttribute("x1", x); line.setAttribute("x2", x); }
+  const decs = steps.filter(isDecision).length;
+  $("#pos").textContent = `step ${cur + 1}/${steps.length} · ${decs} decisions`;
+  $("#note").value = userNotes[cur] || "";
+}
+
+// ---------- notes ----------
+$("#note").addEventListener("input", (e) => {
+  const v = e.target.value;
+  if (v) userNotes[cur] = v; else delete userNotes[cur];
+  try { localStorage.setItem("bv-notes:" + REC.id, JSON.stringify(userNotes)); } catch (err) {}
+  const tick = document.querySelector(`.tick[data-i="${cur}"]`);
+  if (tick) tick.classList.toggle("hasnote", !!v);
+});
+$("#exportNotes").onclick = () => {
+  const blob = new Blob([JSON.stringify({ record: REC.id, header: REC.header, notes: userNotes }, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `notes_${REC.header.seed || "game"}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+$("#importNotes").onchange = async (e) => {
+  const f = e.target.files[0];
+  if (!f || !REC) return;
+  try {
+    const o = JSON.parse(await f.text());
+    userNotes = { ...userNotes, ...(o.notes || {}) };
+    localStorage.setItem("bv-notes:" + REC.id, JSON.stringify(userNotes));
+  } catch (err) {}
+  drawTimeline(); render();
+};
+</script>
+</body>
+</html>

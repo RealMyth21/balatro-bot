@@ -15,7 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from balatro_bot.eval.fast_eval import run  # noqa: E402
-from balatro_bot.eval.report import format_paired, format_summary, load, paired, summarize  # noqa: E402
+from balatro_bot.eval.report import format_paired, format_summary, label, load, paired, summarize  # noqa: E402
 from balatro_bot.eval.seeds import seeds  # noqa: E402
 
 
@@ -28,6 +28,7 @@ def main() -> None:
     ap.add_argument("--stake", default="GOLD")
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--worlds", type=int, default=16, help="search: sampled worlds per decision")
+    ap.add_argument("--exhaustive", action="store_true", help="search: no adaptive pruning of candidates")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--report-only", action="store_true")
     args = ap.parse_args()
@@ -35,17 +36,16 @@ def main() -> None:
     seed_list = seeds(args.split, args.n)
     if not args.report_only:
         for pol in args.policy:
-            opts = {"worlds": args.worlds} if pol == "search" else {}
+            opts = {"worlds": args.worlds, "adaptive": not args.exhaustive} if pol == "search" else {}
             run(pol, seed_list, out, args.deck, args.stake, args.workers, opts)
     wanted = set(seed_list)
     rows = [r for r in load(out) if r["seed"] in wanted and r["deck"] == args.deck and r["stake"] == args.stake]
     by_pol: dict[str, list[dict]] = {}
     for r in rows:
-        by_pol.setdefault(r["policy"], []).append(r)
+        by_pol.setdefault(label(r), []).append(r)
     print(f"\n{args.deck}/{args.stake}, {args.split} seeds (first {args.n}):")
     for pol, rs in sorted(by_pol.items()):
-        errors = sum(1 for r in rs if r.get("error"))
-        print("  " + format_summary(pol, summarize(rs)) + (f"  [{errors} games stopped on errors]" if errors else ""))
+        print("  " + format_summary(pol, summarize(rs)))
     pols = sorted(by_pol)
     for i in range(len(pols)):
         for j in range(i + 1, len(pols)):

@@ -8,8 +8,16 @@ Added here (BalatroLLM can't do these out of the box):
   - optional local analysis tools (agent/tools.py) answered in a multi-turn loop inside a decision
   - a model-id check (Moonshot falls back to an older model on a mistyped id), a step cap
   - per-decision outcomes (outcomes.jsonl) for the fine-tuning exporter
-  - cost from token usage at your provider's prices, and a total budget cap
+  - cost from token usage at your provider's prices, and a budget cap checked before every LLM call
+  - errors sorted into the policy's own failures (a loss) and infrastructure errors (left out of the
+    results and retried on the next run)
   - option to drop `cache_control` text-part keys that only OpenRouter/Anthropic understand
+  - a game record per game (record.jsonl in the run's folder, agent/recorder.py): every request in
+    order, who decided it, the resulting state, and for model decisions the reasoning, every analysis
+    tool call with its full result, tokens and cost; open it in viewer/index.html
+
+Cost is computed from the usage of answered calls. Calls that timed out or were retried inside the
+OpenAI client may still be billed by the provider; check its dashboard for the exact total.
 """
 
 from __future__ import annotations
@@ -17,11 +25,19 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from balatro_bot.agent.tools import TOOL_NAMES, TOOL_SCHEMAS, Shadow, run_tool
+from balatro_bot.agent.recorder import Decision, GameRecorder, versions
+from balatro_bot.agent.tools import TOOL_NAMES, Shadow, run_tool, tools_for_state
+from balatro_bot.eval.report import error_kind
+
+
+def cached_tokens(usage: dict) -> int:
+    """Cached prompt tokens: OpenAI-style `prompt_tokens_details.cached_tokens` or Moonshot's
+    top-level `cached_tokens`."""
+    return ((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or usage.get("cached_tokens") or 0)
 
 
 @dataclass
@@ -36,28 +52,57 @@ class Prices:
     def cost(self, usage: dict) -> float:
         prompt = usage.get("prompt_tokens") or 0
         completion = usage.get("completion_tokens") or 0
-        cached = ((usage.get("prompt_tokens_details") or {}).get("cached_tokens")
-                  or usage.get("cached_tokens") or 0)
+        cached = cached_tokens(usage)
         return ((prompt - cached) * self.input + cached * self.cached_input + completion * self.output) / 1e6
 
 
 def run_cost(run_dir: Path, prices: Prices) -> dict:
-    """Tokens and cost of one BalatroLLM run, from its responses.jsonl."""
-    tok = {"prompt": 0, "completion": 0, "cached": 0, "calls": 0}
+    """Tokens and cost of one BalatroLLM run, from its responses.jsonl (answered calls; `failed_calls`
+    counts calls that ended in an error and may still have been billed)."""
+    tok = {"prompt": 0, "completion": 0, "cached": 0, "calls": 0, "failed_calls": 0}
     cost = 0.0
     path = run_dir / "responses.jsonl"
     if path.exists():
         for line in path.read_text().splitlines():
-            body = ((json.loads(line).get("response") or {}).get("body") or {})
+            rec = json.loads(line)
+            if rec.get("error"):
+                tok["failed_calls"] += 1
+            body = ((rec.get("response") or {}).get("body") or {})
             usage = body.get("usage") or {}
             if not usage:
                 continue
             tok["calls"] += 1
             tok["prompt"] += usage.get("prompt_tokens") or 0
             tok["completion"] += usage.get("completion_tokens") or 0
-            tok["cached"] += (usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0
+            tok["cached"] += cached_tokens(usage)
             cost += prices.cost(usage)
     return {"tokens": tok, "cost_usd": round(cost, 6)}
+
+
+def same_model(asked: str, served: str) -> bool:
+    """Whether the provider served the model asked for: the same id, possibly with a provider prefix
+    ("moonshotai/...") or a dated snapshot suffix ("...-2026-11-01"). Anything else (an older model a
+    provider substitutes for a mistyped or retired id, or no id at all) is a mismatch."""
+    if not served:
+        return False
+    a, s = asked.lower().rsplit("/", 1)[-1], served.lower().rsplit("/", 1)[-1]
+    if s == a:
+        return True
+    rest = s[len(a):] if s.startswith(a) else ""
+    return rest[:1] == "-" and rest[1:2].isdigit()
+
+
+@dataclass
+class Budget:
+    """Spend shared by all games of a run (one asyncio loop), updated after every LLM call."""
+
+    limit: float = float("inf")
+    spent: float = 0.0
+    prices: Prices = field(default_factory=Prices)
+
+    @property
+    def exhausted(self) -> bool:
+        return self.spent >= self.limit
 
 
 def _make_bot_class():
@@ -67,15 +112,26 @@ def _make_bot_class():
     from balatrollm.llm import LLMClientError, LLMTimeoutError
     from balatrollm.strategy import StrategyManager
 
-    class MirroredClient:
-        """Forwards to BalatroLLM's game client and mirrors successful requests to a jackdaw shadow."""
+    class RecordingClient:
+        """Forwards to BalatroLLM's game client; records every request in the game record and mirrors
+        the ones the game accepted to the analysis tools' jackdaw shadow (when tools are on)."""
 
-        def __init__(self, inner, shadow: Shadow):
-            self._inner, self._shadow = inner, shadow
+        def __init__(self, inner, bot, shadow: Shadow | None):
+            self._inner, self._bot, self._shadow = inner, bot, shadow
 
         async def call(self, method: str, params: dict | None = None):
-            result = await self._inner.call(method, params)
-            self._shadow.apply(method, params)
+            t0 = time.perf_counter()
+            try:
+                result = await self._inner.call(method, params)
+            except Exception as e:
+                data = getattr(e, "data", None) or {}
+                self._bot._record_step(method, params, error={"name": data.get("name") or type(e).__name__,
+                                                              "message": getattr(e, "message", str(e))},
+                                       seconds=time.perf_counter() - t0)
+                raise
+            if self._shadow is not None:
+                self._shadow.apply(method, params)
+            self._bot._record_step(method, params, result=result, seconds=time.perf_counter() - t0)
             return result
 
         async def __aenter__(self):
@@ -87,8 +143,12 @@ def _make_bot_class():
     class AgentBot(Bot):
         def __init__(self, task, config, port: int, *, tools: bool = False, max_steps: int = 2000,
                      max_tool_rounds: int = 3, strip_cache_control: bool = True,
-                     strategies_dir: Path | None = None, drop_params: tuple[str, ...] = ()):
+                     strategies_dir: Path | None = None, drop_params: tuple[str, ...] = (),
+                     budget: Budget | None = None, option_evaluator=None):
             super().__init__(task, config, port)
+            self.option_evaluator = option_evaluator  # settings for evaluate_options (None: defaults)
+            self.budget = budget or Budget()
+            self.game_spent = 0.0
             for key in drop_params:  # BalatroLLM's config merge can add params but not remove them
                 self.model_config.pop(key, None)
             if strategies_dir is not None and (strategies_dir / task.strategy).exists():
@@ -100,13 +160,30 @@ def _make_bot_class():
             self._last_custom_id: str | None = None
             self._recorded = False
             self._shadow: Shadow | None = None
+            self.recorder: GameRecorder | None = None
+            self.record_header: dict = {}
+            self._decision: Decision | None = None  # the model decision waiting for its game action
+            self._acting = False
 
         async def __aenter__(self):
             await super().__aenter__()
             if self.tools_enabled:
                 self._shadow = Shadow()
-                self._balatro = MirroredClient(self._balatro, self._shadow)
+            self._balatro = RecordingClient(self._balatro, self, self._shadow)
             return self
+
+        # -- the game record ------------------------------------------------------------------
+        def _record_step(self, method: str, params: dict | None, *, result=None, error=None, seconds=None) -> None:
+            if self.recorder is None:
+                if self._collector is None:  # BalatroLLM's connection check, before the run starts
+                    return
+                self.recorder = GameRecorder(self._collector.run_dir / "record.jsonl", **self.record_header)
+            decision, actor = None, "auto"
+            if self._acting and self._decision is not None:  # the action the model chose
+                decision, actor, self._decision = self._decision, "llm", None
+            clean = {k: v for k, v in (params or {}).items() if k != "reasoning"}
+            self.recorder.step(method, clean, result=result, error=error, actor=actor, decision=decision,
+                               seconds=seconds)
 
         # -- outcomes for the fine-tuning exporter ---------------------------------------------
         def _outcome(self, outcome: str, **extra) -> None:
@@ -122,6 +199,8 @@ def _make_bot_class():
 
         async def _handle_failed_call(self, msg: str):
             self._outcome("failed", detail=msg[:300])
+            if "[INTERNAL_ERROR]" in msg:  # the server broke, not the model's move: end as infrastructure
+                raise BotError(f"game server internal error: {msg[:300]}")
             return await super()._handle_failed_call(msg)
 
         async def _execute_tool_call(self, response):
@@ -129,7 +208,23 @@ def _make_bot_class():
             if self._steps > self.max_steps:
                 raise BotError(f"step cap reached ({self.max_steps} actions)")
             self._recorded = False
-            state = await super()._execute_tool_call(response)
+            if self._decision is not None:  # the reasoning argument BalatroLLM asks for with each action
+                calls = getattr(response.choices[0].message, "tool_calls", None) or []
+                if calls:
+                    try:
+                        why = json.loads(calls[0].function.arguments or "{}").get("reasoning")
+                    except (json.JSONDecodeError, AttributeError):
+                        why = None
+                    if why:
+                        self._decision.extra["action_reasoning"] = why
+            self._acting = True
+            try:
+                state = await super()._execute_tool_call(response)
+            finally:
+                self._acting = False
+                if self._decision is not None and self.recorder is not None:  # no request reached the game
+                    self.recorder.note(self._last_error_msg or "no valid action", self._decision)
+                self._decision = None
             if not self._recorded:  # the error/failed handlers above record their own outcome
                 self._outcome("successful")
             return state
@@ -148,6 +243,8 @@ def _make_bot_class():
             ]}]
 
         async def _call_logged(self, messages: list[dict], tools: list[dict]):
+            if self.budget.exhausted:
+                raise BotError(f"budget exhausted (${self.budget.spent:.2f} of ${self.budget.limit:.2f})")
             custom_id = self._collector.write_request(
                 {"model": self.task.model, "messages": messages, "tools": tools, **self.model_config})
             self._last_custom_id = custom_id
@@ -162,28 +259,70 @@ def _make_bot_class():
             self._collector.write_response(id=str(time.time_ns() // 1_000_000), custom_id=custom_id,
                                            response=ChatCompletionResponse(request_id=request_id, status_code=200,
                                                                            body=response.model_dump()))
+            usage = response.usage.model_dump() if getattr(response, "usage", None) else {}
+            cost = self.budget.prices.cost(usage)
+            self.budget.spent += cost
+            self.game_spent += cost
+            if self._decision is not None:
+                d = self._decision
+                d.model_calls += 1
+                d.cost_usd += cost
+                d.tokens["prompt"] += usage.get("prompt_tokens") or 0
+                d.tokens["completion"] += usage.get("completion_tokens") or 0
+                d.tokens["cached"] += cached_tokens(usage)
+                d.extra.setdefault("custom_ids", []).append(custom_id)  # links to requests/responses.jsonl
+                msg = response.choices[0].message if response.choices else None
+                if msg is not None:
+                    extra = getattr(msg, "model_extra", None) or {}
+                    d.reasoning.append(getattr(msg, "reasoning_content", None) or extra.get("reasoning_content") or "")
+                    d.reasoning.append(msg.content or "")
             served = getattr(response, "model", "") or ""
-            if self.task.model not in served and served not in self.task.model:
+            if not same_model(self.task.model, served):
                 raise BotError(f"model mismatch: asked for {self.task.model!r}, provider served {served!r}")
             return response, custom_id
 
         async def _get_llm_response(self, gamestate: dict[str, Any]):
+            t0 = time.perf_counter()
+            self._decision = Decision(extra={"state_seen": gamestate.get("state")})
+            try:
+                return await self._decide(gamestate)
+            finally:
+                if self._decision is not None:
+                    self._decision.seconds = time.perf_counter() - t0
+
+        async def _decide(self, gamestate: dict[str, Any]):
             messages = self._messages(gamestate)
             game_tools = self.strategy.get_tools(gamestate["state"])
-            use_local = self.tools_enabled and gamestate.get("state") == "SELECTING_HAND"
+            local_tools = tools_for_state(gamestate.get("state")) if self.tools_enabled else []
             for rnd in range(self.max_tool_rounds + 1):
-                tools = game_tools + (TOOL_SCHEMAS if use_local and rnd < self.max_tool_rounds else [])
-                response, _ = await self._call_logged(messages, tools)
+                offer = bool(local_tools) and rnd < self.max_tool_rounds
+                response, _ = await self._call_logged(messages, game_tools + (local_tools if offer else []))
                 msg = response.choices[0].message
-                call = (msg.tool_calls or [None])[0] if getattr(msg, "tool_calls", None) else None
-                if call is None or call.function.name not in TOOL_NAMES or not use_local:
-                    return response
-                result = run_tool(self._shadow, gamestate, call.function.name, call.function.arguments)
-                self._outcome("local_tool", tool=call.function.name)
-                messages = messages + [
-                    msg.model_dump(exclude_none=True),
-                    {"role": "tool", "tool_call_id": call.id, "content": result},
-                ]
+                calls = list(getattr(msg, "tool_calls", None) or [])
+                if not offer or not calls or calls[0].function.name not in TOOL_NAMES:
+                    return response  # a game action (BalatroLLM executes the first call) or none
+                # Answer every analysis call (they may come in parallel); game actions mixed in after
+                # them are dropped from the replayed message, so no tool call is left unanswered.
+                local = [c for c in calls if c.function.name in TOOL_NAMES]
+                answers = []
+                for c in local:  # off the event loop: other games keep running meanwhile
+                    t_tool = time.perf_counter()
+                    result = await asyncio.to_thread(run_tool, self._shadow, gamestate, c.function.name,
+                                                     c.function.arguments, self.option_evaluator)
+                    answers.append({"role": "tool", "tool_call_id": c.id, "content": result})
+                    if self._decision is not None:
+                        try:
+                            args = json.loads(c.function.arguments or "{}")
+                        except json.JSONDecodeError:
+                            args = c.function.arguments
+                        self._decision.tool_calls.append({"name": c.function.name, "arguments": args,
+                                                          "result": json.loads(result),
+                                                          "seconds": round(time.perf_counter() - t_tool, 3)})
+                self._outcome("local_tool", tools=[c.function.name for c in local])
+                assistant = msg.model_dump(exclude_none=True)
+                assistant["tool_calls"] = [tc for tc in assistant.get("tool_calls") or []
+                                           if tc["function"]["name"] in TOOL_NAMES]
+                messages = messages + [assistant, *answers]
             return response
 
     return AgentBot
@@ -194,65 +333,133 @@ async def run_games(*, ports: list[int], seeds: list[str], model: str, base_url:
                     strategy: str = "default", tools: bool = False, model_config: dict | None = None,
                     prices: Prices | None = None, max_cost: float = float("inf"), max_steps: int = 2000,
                     strip_cache_control: bool = True, strategies_dir: Path | None = None,
-                    drop_params: tuple[str, ...] = ()) -> dict:
-    """Play each seed once (skipping seeds already in `summary`), len(ports) games at a time."""
+                    drop_params: tuple[str, ...] = (), port_alive=None, option_evaluator=None) -> dict:
+    """Play each seed once, len(ports) games at a time. Seeds already finished under the same label,
+    deck, stake and model are skipped; seeds that stopped on an infrastructure error are retried.
+
+    Budget: `max_cost` covers everything spent under this configuration, earlier runs included. It is
+    checked before every LLM call (games still running stop when it is reached, and are retried next
+    time), and a new game only starts if the games already running are expected to fit.
+
+    port_alive(port) -> bool (e.g. ServerPool.alive): a port whose server died is taken out of use.
+    option_evaluator: settings for the evaluate_options tool (balatro_bot.search.option_eval)."""
     from balatrollm.config import Config, Task
 
     prices = prices or Prices()
     AgentBot = _make_bot_class()  # noqa: N806
-    done = set()
-    spent = 0.0
+    done: set[str] = set()
+    budget = Budget(limit=max_cost, prices=prices)
+    finished_costs: list[float] = []
     if summary.exists():
         for line in summary.read_text().splitlines():
+            if not line.strip():
+                continue
             r = json.loads(line)
-            if r.get("policy") == label:
+            if (r.get("policy"), r.get("deck"), r.get("stake"), r.get("model")) != (label, deck, stake, model):
+                continue
+            budget.spent += r.get("cost_usd") or 0.0
+            if error_kind(r) != "infra":
                 done.add(r["seed"])
-                spent += r.get("cost_usd") or 0.0
+                finished_costs.append(r.get("cost_usd") or 0.0)
     todo = [s for s in seeds if s not in done]
     config = Config(model=[model], seed=todo, deck=[deck], stake=[stake], strategy=[strategy],
                     parallel=len(ports), base_url=base_url, api_key=api_key, model_config=model_config or {})
-    port_q: asyncio.Queue[int] = asyncio.Queue()
+    port_q: asyncio.Queue[int | None] = asyncio.Queue()
     for p in ports:
         port_q.put_nowait(p)
+    live = set(ports)
     summary.parent.mkdir(parents=True, exist_ok=True)
-    lock = asyncio.Lock()
-    state = {"spent": spent, "stopped": False, "played": 0}
+    running: dict[str, Any] = {}
+    state = {"stopped": False, "played": 0, "start_spent": budget.spent}
+
+    def fits() -> bool:
+        if budget.exhausted:
+            return False
+        if not finished_costs:
+            return True
+        per_game = sum(finished_costs) / len(finished_costs)
+        committed = sum(max(0.0, per_game - b.game_spent) for b in running.values())
+        return budget.spent + committed + per_game <= budget.limit
+
+    async def get_port() -> int | None:
+        while True:
+            port = await port_q.get()
+            if port is None or port_alive is None or port_alive(port):
+                return port
+            live.discard(port)
+            print(f"  server on port {port} died; continuing on {len(live)} servers", flush=True)
+            if not live:  # wake every waiting game: nothing left to play on
+                for _ in todo:
+                    port_q.put_nowait(None)
 
     async def one(seed: str) -> None:
-        if state["stopped"] or state["spent"] >= max_cost:
+        port = await get_port()
+        if port is None:
             state["stopped"] = True
             return
-        port = await port_q.get()
+        played = False
         try:
+            if state["stopped"] or not fits():
+                state["stopped"] = True
+                return
+            played = True
             task = Task(model=model, seed=seed, deck=deck, stake=stake, strategy=strategy)
             t0 = time.perf_counter()
             error = None
             stats = None
             bot = AgentBot(task, config, port, tools=tools, max_steps=max_steps,
                            strip_cache_control=strip_cache_control, strategies_dir=strategies_dir,
-                           drop_params=drop_params)
+                           drop_params=drop_params, budget=budget, option_evaluator=option_evaluator)
+            running[seed] = bot
+            ev = option_evaluator
+            bot.record_header = {
+                "seed": seed, "deck": deck, "stake": stake, "port": port,
+                "player": {"kind": "llm", "label": label, "model": model, "strategy": strategy, "tools": tools,
+                           "model_config": model_config or {},
+                           "option_evaluator": None if not tools or ev is None else {
+                               "worlds": ev.worlds, "rollout": ev.rollout,
+                               "weights": list(ev.scorer.reach_weights) + [ev.scorer.win_weight]}},
+                "versions": versions()}
             try:
                 async with bot:
                     stats = await bot.play(runs_dir)
             except Exception as e:  # noqa: BLE001  record and continue with other seeds
                 error = f"{type(e).__name__}: {e}"
+                if bot._collector is not None:  # BalatroLLM still logged the game up to the error
+                    try:
+                        stats = bot._collector._calculate_stats()
+                    except Exception:  # noqa: BLE001  too short to have stats
+                        stats = None
+            finally:
+                running.pop(seed, None)
             run_dir = bot._collector.run_dir if bot._collector else None
             cost = run_cost(run_dir, prices) if run_dir else {"tokens": {}, "cost_usd": 0.0}
+            if bot.recorder is not None:
+                bot.recorder.end(won=bool(getattr(stats, "run_won", False)), ante=getattr(stats, "final_ante", None),
+                                 round=getattr(stats, "final_round", None), error=error,
+                                 error_kind=error_kind({"error": error}), cost_usd=bot.game_spent,
+                                 seconds=round(time.perf_counter() - t0, 1))
             row = {"seed": seed, "policy": label, "deck": deck, "stake": stake,
                    "won": bool(getattr(stats, "run_won", False)), "ante": getattr(stats, "final_ante", None),
                    "round": getattr(stats, "final_round", None), "cost_usd": cost["cost_usd"],
                    "tokens": cost["tokens"], "seconds": round(time.perf_counter() - t0, 1), "error": error,
-                   "run_dir": str(run_dir) if run_dir else None, "model": model, "tools": tools}
-            async with lock:
-                state["spent"] += cost["cost_usd"]
-                state["played"] += 1
-                with summary.open("a") as f:
-                    f.write(json.dumps(row) + "\n")
-                print(f"  {label} {seed}: ante {row['ante']} won={row['won']} ${cost['cost_usd']:.3f} "
-                      f"(total ${state['spent']:.2f}){' ERROR ' + error if error else ''}", flush=True)
+                   "error_kind": error_kind({"error": error}),
+                   "run_dir": str(run_dir) if run_dir else None, "model": model, "tools": tools,
+                   "record": str(bot.recorder.path) if bot.recorder else None}
+            if row["error_kind"] != "infra":
+                finished_costs.append(cost["cost_usd"])
+            state["played"] += 1
+            with summary.open("a") as f:
+                f.write(json.dumps(row) + "\n")
+            note = f" {row['error_kind'].upper()} ERROR {error}" if error else ""
+            print(f"  {label} {seed}: ante {row['ante']} won={row['won']} ${cost['cost_usd']:.3f} "
+                  f"(total ${budget.spent:.2f}){note}", flush=True)
         finally:
-            await asyncio.sleep(1.0)  # let the server settle before the next game on this port
+            if played:
+                await asyncio.sleep(1.0)  # let the server settle before the next game on this port
             port_q.put_nowait(port)
 
     await asyncio.gather(*(one(s) for s in todo))
-    return {"played": state["played"], "spent_usd": state["spent"], "stopped_on_budget": state["stopped"]}
+    return {"played": state["played"], "spent_usd": budget.spent - state["start_spent"],
+            "total_spent_usd": budget.spent, "stopped_on_budget": state["stopped"] and bool(live),
+            "servers_lost": len(ports) - len(live)}

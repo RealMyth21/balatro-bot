@@ -22,9 +22,10 @@ ERROR_CODES = {"INTERNAL_ERROR": -32000, "BAD_REQUEST": -32001, "INVALID_STATE":
 
 
 class EngineHTTPServer(HTTPServer):
-    allow_reuse_address = True
+    """Binds at construction; requests wait in the listen queue until the engine is attached and
+    serve_forever runs."""
 
-    def __init__(self, addr, engine: EngineClient):
+    def __init__(self, addr, engine: EngineClient | None = None):
         super().__init__(addr, _Handler)
         self.engine = engine
         self.lock = threading.Lock()
@@ -72,20 +73,23 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def serve(host: str = "127.0.0.1", port: int = 13000, ready: threading.Event | None = None) -> None:
-    with EngineClient() as eng, EngineHTTPServer((host, port), eng) as httpd:
+    """Bind first (port 0 = any free port) and announce the port, then boot the engine and serve."""
+    with EngineHTTPServer((host, port)) as httpd:
         print(f"engine serve: balatrobot API on http://{host}:{httpd.server_address[1]}", flush=True)
-        if ready:
-            ready.set()
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            pass
+        with EngineClient() as eng:
+            httpd.engine = eng
+            if ready:
+                ready.set()
+            try:
+                httpd.serve_forever()
+            except KeyboardInterrupt:
+                pass
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=13000)
+    ap.add_argument("--port", type=int, default=13000, help="0 picks a free port (printed on startup)")
     args = ap.parse_args()
     serve(args.host, args.port)
 

@@ -61,3 +61,21 @@ class BalatroClient:
 
     def close(self) -> None:
         self._http.close()
+
+
+def settled(client, result: dict, polls: int = 40, wait: float = 0.05) -> dict:
+    """The real game keeps animating after balatrobot answers: poll its gamestate until two
+    consecutive snapshots match (fields that differ between processes ignored)."""
+    import time
+
+    from balatro_bot.validation.diff import normalize
+
+    prev, cur_raw = normalize(result), result
+    for _ in range(polls):
+        time.sleep(wait)
+        cur_raw = client.gamestate()
+        cur = normalize(cur_raw)
+        if cur == prev:
+            return cur_raw
+        prev = cur
+    return cur_raw

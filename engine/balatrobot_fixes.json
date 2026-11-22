@@ -12,5 +12,19 @@
     "new": "local needs_hand = (card.key or \"\"):find(\"arcana\") ~= nil or (card.key or \"\"):find(\"spectral\") ~= nil -- fix: pack type\n",
     "count": 1,
     "why": "Whether to wait for the hand was decided by the first card's set; a Celestial pack whose first card is Black Hole (Spectral) waited forever for a hand that is never dealt."
+  },
+  {
+    "file": "src/lua/endpoints/sell.lua",
+    "old": "local count_decreased = (current_area.config.card_count == initial_count - 1)\n",
+    "new": "local count_decreased = (current_area.config.card_count <= initial_count) -- fix: Invisible Joker\n",
+    "count": 1,
+    "why": "Selling Invisible Joker duplicates another joker, so the joker count does not drop; the request never answered. The sold card being gone and the payout are still checked."
+  },
+  {
+    "file": "src/lua/endpoints/pack.lua",
+    "old": "local needs_hand = pack_key == \"Tarot\" or pack_key == \"Spectral\"\n",
+    "new": "local needs_hand = pack_key == \"Spectral\" -- fix: pack type, not the first card\n    for _, c in ipairs(G.pack_cards and G.pack_cards.cards or {}) do\n      local s = c.ability and c.ability.set\n      if s == \"Tarot\" or s == \"Planet\" then needs_hand = s == \"Tarot\"; break end\n    end\n",
+    "count": 1,
+    "why": "Same as the buy fix, when taking a card: a Celestial pack whose first card is Black Hole (Spectral) waited forever for a hand. A Tarot means an Arcana pack (hand dealt), a Planet a Celestial pack (no hand); otherwise only Spectral packs deal one."
   }
 ]

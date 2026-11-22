@@ -4,6 +4,9 @@ an API key: prompts, tool calls, logging, parallel games, retries and cost accou
 It answers every chat completion with a valid tool call chosen from the tools offered in the request
 (a deliberately simple policy: play one card, leave shops, skip packs). Token usage is estimated from
 text length so cost accounting can be exercised. Optional fault injection exercises error paths.
+Like real providers it rejects (HTTP 400) a conversation with a tool call left unanswered. With
+parallel_tools it calls every offered analysis tool at once, plus a game action, as a model with
+parallel tool calls may.
 
   python -m balatro_bot.agent.mock_llm --port 18080
   # then point the client at base_url=http://127.0.0.1:18080/v1, any api key, any model name
@@ -30,17 +33,37 @@ PREFERENCES: list[tuple[str, dict]] = [
 ]
 
 
-ANALYSIS_TOOLS = ("score_plays", "estimate_clear_chance")
+ANALYSIS_TOOLS = ("score_plays", "estimate_clear_chance", "evaluate_options")
+
+
+def choose_tool_calls(tools: list[dict], messages: list[dict] | None = None,
+                      parallel: bool = False) -> list[tuple[str, dict]]:
+    names = [t.get("function", {}).get("name") for t in tools]
+    # with analysis tools offered, call them first (once per decision) to exercise the tool loop
+    already_used = any(m.get("role") == "tool" for m in (messages or []) if isinstance(m, dict))
+    if not already_used:
+        offered = [(n, {"top": 3} if n == "score_plays" else {}) for n in ANALYSIS_TOOLS if n in names]
+        if offered:
+            if not parallel:
+                return offered[:1]
+            action = _game_action(tools, names)
+            return offered + ([action] if action[0] else [])
+    return [_game_action(tools, names)]
 
 
 def choose_tool_call(tools: list[dict], messages: list[dict] | None = None) -> tuple[str, dict]:
-    names = [t.get("function", {}).get("name") for t in tools]
-    # with analysis tools offered, call one first (once per decision) to exercise the tool loop
-    already_used = any(m.get("role") == "tool" for m in (messages or []) if isinstance(m, dict))
-    if not already_used:
-        for name in ANALYSIS_TOOLS:
-            if name in names:
-                return name, ({"top": 3} if name == "score_plays" else {})
+    return choose_tool_calls(tools, messages)[0]
+
+
+def unanswered_tool_calls(messages: list[dict]) -> list[str]:
+    """Ids of assistant tool calls with no matching tool message (providers reject these)."""
+    asked = [tc.get("id") for m in messages if isinstance(m, dict) and m.get("role") == "assistant"
+             for tc in (m.get("tool_calls") or [])]
+    answered = {m.get("tool_call_id") for m in messages if isinstance(m, dict) and m.get("role") == "tool"}
+    return [i for i in asked if i not in answered]
+
+
+def _game_action(tools: list[dict], names: list) -> tuple[str, dict]:
     for name, args in PREFERENCES:
         if name in names:
             fn = next(t["function"] for t in tools if t.get("function", {}).get("name") == name)
@@ -58,8 +81,11 @@ def estimate_tokens(obj) -> int:
 
 
 class MockState:
-    def __init__(self, latency: float = 0.0, error_rate: float = 0.0, seed: int = 0):
+    def __init__(self, latency: float = 0.0, error_rate: float = 0.0, seed: int = 0, parallel_tools: bool = False,
+                 served_model: str | None = None):
         self.latency, self.error_rate = latency, error_rate
+        self.parallel_tools, self.served_model = parallel_tools, served_model
+        self.rejected = 0
         self.rng = random.Random(seed)
         self.calls = 0
         self.lock = threading.Lock()
@@ -88,26 +114,35 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": {"message": f"unknown path {self.path}"}})
             return
         req = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        missing = unanswered_tool_calls(req.get("messages") or [])
+        if missing:
+            with state.lock:
+                state.rejected += 1
+            self._send(400, {"error": {"message": f"tool_call_ids without a tool response: {missing}",
+                                       "type": "invalid_request_error"}})
+            return
         with state.lock:
             state.calls += 1
             fault = state.rng.random() < state.error_rate
             kind = state.rng.choice(["no_tool", "bad_json", "bad_args"]) if fault else None
         if state.latency:
             time.sleep(state.latency)
-        name, args = choose_tool_call(req.get("tools") or [], req.get("messages"))
+        calls = choose_tool_calls(req.get("tools") or [], req.get("messages"), state.parallel_tools)
         message: dict = {"role": "assistant", "content": None}
-        if kind == "no_tool" or not name:
+        if kind == "no_tool" or not calls[0][0]:
             message["content"] = "I think I should play my best hand."
         else:
-            arguments = "{not json" if kind == "bad_json" else json.dumps(
-                {"cards": [99]} if kind == "bad_args" and name == "play" else args)
-            message["tool_calls"] = [{"id": f"call_{uuid.uuid4().hex[:12]}", "type": "function",
-                                      "function": {"name": name, "arguments": arguments}}]
+            message["tool_calls"] = []
+            for name, args in calls:
+                arguments = "{not json" if kind == "bad_json" else json.dumps(
+                    {"cards": [99]} if kind == "bad_args" and name == "play" else args)
+                message["tool_calls"].append({"id": f"call_{uuid.uuid4().hex[:12]}", "type": "function",
+                                              "function": {"name": name, "arguments": arguments}})
         prompt_tokens = estimate_tokens(req.get("messages")) + estimate_tokens(req.get("tools"))
         completion_tokens = 40
         self._send(200, {
             "id": f"chatcmpl-{uuid.uuid4().hex[:16]}", "object": "chat.completion", "created": int(time.time()),
-            "model": req.get("model", "mock-model"),
+            "model": state.served_model or req.get("model", "mock-model"),
             "choices": [{"index": 0, "message": message,
                          "finish_reason": "tool_calls" if message.get("tool_calls") else "stop"}],
             "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
@@ -115,9 +150,11 @@ class _Handler(BaseHTTPRequestHandler):
         })
 
 
-def start(port: int = 0, latency: float = 0.0, error_rate: float = 0.0) -> tuple[ThreadingHTTPServer, threading.Thread]:
+def start(port: int = 0, latency: float = 0.0, error_rate: float = 0.0, parallel_tools: bool = False,
+          served_model: str | None = None) -> tuple[ThreadingHTTPServer, threading.Thread]:
     httpd = ThreadingHTTPServer(("127.0.0.1", port), _Handler)
-    httpd.mock = MockState(latency, error_rate)  # type: ignore[attr-defined]
+    httpd.mock = MockState(latency, error_rate, parallel_tools=parallel_tools,  # type: ignore[attr-defined]
+                           served_model=served_model)
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
     return httpd, t

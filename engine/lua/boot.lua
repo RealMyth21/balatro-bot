@@ -320,7 +320,7 @@ local function queue_signature()
     end
   end
   if n == 0 then return nil end
-  return n, table.concat(ids, ",")
+  return n, n .. ":" .. table.concat(ids, ",")
 end
 
 -- After an action's completion condition fires, keep ticking until no new events are pending,
@@ -378,6 +378,11 @@ local PENDING = { state = "PENDING" }
 
 local in_execute = false
 
+-- Set when the game state can no longer be trusted (an error inside a game event, or an action that
+-- never finished). The engine answers that request with an error and exits; EngineClient starts a
+-- fresh one and reports the lost game.
+local POISONED = nil
+
 local function handle(req)
   captured = nil
   -- Endpoints may read the gamestate while validating (buy/use look up the item); that must be
@@ -390,23 +395,32 @@ local function handle(req)
     end
   end
   in_execute = true
-  local ok, err = pcall(BB_DISPATCHER.dispatch, req)
+  local ok, err = pcall(BB_DISPATCHER.dispatch, req) -- endpoint errors become error replies here
   in_execute = false
   local ticks = 0
   if ok then
-    while captured == nil do
-      tick()
-      ticks = ticks + 1
-      if ticks >= MAX_TICKS then
-        captured = { message = "engine: action did not complete after " .. MAX_TICKS .. " ticks (state "
-          .. tostring(G.STATE) .. ")", name = "INTERNAL_ERROR" }
+    ok, err = pcall(function()
+      while captured == nil do
+        tick()
+        ticks = ticks + 1
+        if ticks >= MAX_TICKS then
+          POISONED = req.method .. " did not complete after " .. MAX_TICKS .. " ticks (state "
+            .. tostring(G.STATE) .. ")"
+          captured = { message = "engine: " .. POISONED, name = "INTERNAL_ERROR" }
+        end
       end
-    end
+    end)
+    if not ok then POISONED = "error in a game event during " .. tostring(req.method) .. ": " .. tostring(err) end
   end
   BB_GAMESTATE.get_gamestate = real_get_gamestate
-  if not ok then error(err) end
+  if not ok then error(err, 0) end
   if not is_error(captured) and captured.state ~= nil then
-    ticks = ticks + settle()
+    local good, extra = pcall(settle)
+    if not good then
+      POISONED = "error in a game event after " .. tostring(req.method) .. ": " .. tostring(extra)
+      error(extra, 0)
+    end
+    ticks = ticks + extra
     captured = real_get_gamestate()
   end
   return captured, ticks
@@ -467,10 +481,15 @@ if os.getenv("ENGINE_HOOKS") then dofile(os.getenv("ENGINE_HOOKS")) end
 stdout:write(json.encode({ ready = true, version = G.VERSION }), "\n")
 stdout:flush()
 
+local function internal_error(id, message)
+  return { id = id, error = { code = -32000, message = message, data = { name = "INTERNAL_ERROR" } } }
+end
+
 for line in io.stdin:lines() do
   if line ~= "" then
     local ok, req = pcall(json.decode, line)
     local out
+    local id = (ok and type(req) == "table" and req.id ~= nil) and req.id or json.null
     if not ok or type(req) ~= "table" then
       out = { id = json.null, error = { code = -32700, message = "parse error", data = { name = "BAD_REQUEST" } } }
     elseif req.method == "engine.quit" then
@@ -478,16 +497,25 @@ for line in io.stdin:lines() do
     else
       local good, resp, ticks = pcall(handle, req)
       if not good then
-        out = { id = req.id, error = { code = -32000, message = tostring(resp), data = { name = "INTERNAL_ERROR" } } }
+        out = internal_error(id, "engine: " .. tostring(resp))
       elseif is_error(resp) then
-        out = { id = req.id, error = { code = ERROR_CODES[resp.name] or -32000, message = resp.message,
-                                       data = { name = resp.name } } }
+        out = { id = id, error = { code = ERROR_CODES[resp.name] or -32000, message = resp.message,
+                                   data = { name = resp.name } } }
       else
-        out = { id = req.id, result = resp, ticks = ticks }
+        out = { id = id, result = resp, ticks = ticks }
       end
     end
-    stdout:write(json.encode(out), "\n")
+    if POISONED and out.error then out.error.data.exiting = true end -- the client restarts the engine
+    local enc_ok, text = pcall(json.encode, out)
+    if not enc_ok then -- e.g. NaN in a game value
+      text = json.encode(internal_error(id, "engine: could not encode the reply: " .. tostring(text)))
+    end
+    stdout:write(text, "\n")
     stdout:flush()
+    if POISONED then
+      io.stderr:write("engine: exiting, the game state is undefined after: " .. POISONED .. "\n")
+      os.exit(4)
+    end
   end
 end
 

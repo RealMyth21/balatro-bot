@@ -7,14 +7,18 @@ local M = {}
 local function noop() end
 
 -- An object on which every method exists and returns 1 (fonts, images, canvases, shaders...).
+-- One shared function per return value: the game calls these every frame, and creating a new
+-- closure per lookup showed up as ~4% of engine time.
 local DUMMY
+local function ret_one() return 1, 1 end
 DUMMY = setmetatable({}, {
-  __index = function() return function() return 1, 1 end end,
+  __index = function() return ret_one end,
   __call = function() return DUMMY end,
 })
 
 local function fallback(tbl, ret)
-  return setmetatable(tbl, { __index = function() return function() return ret end end })
+  local function f() return ret end
+  return setmetatable(tbl, { __index = function() return f end })
 end
 
 local function path_kind(p)

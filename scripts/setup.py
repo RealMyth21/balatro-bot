@@ -155,7 +155,8 @@ def cmd_profile(args) -> None:
     dst.mkdir(parents=True, exist_ok=True)
     for name in ("profile.jkr", "meta.jkr"):
         (dst / name).write_text(_inflate(src / name))
-    print(f"copied profile {args.slot} into {dst}; run the engine with ENGINE_UNLOCK_ALL=0 BOT_PROFILE={args.slot}")
+    print(f"copied profile {args.slot} into {dst}; run the engine with "
+          f"ENGINE_UNLOCK_ALL=0 ENGINE_SAVE={dst.parent} BOT_PROFILE={args.slot}")
 
 
 def cmd_all(args) -> None:

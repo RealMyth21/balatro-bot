@@ -52,3 +52,29 @@ def test_actions_and_errors(eng):
         eng.call("buy", {"card": 0})  # not in the shop
     debug = eng.call("engine_debug_state")
     assert debug["rng"]["seed"] == "TESTSEED"
+
+
+def test_engine_recovers_from_an_error_inside_a_game_event(monkeypatch):
+    from balatro_bot.game.client import RPCError
+
+    monkeypatch.setenv("ENGINE_HOOKS", str(ROOT / "tests/data/crash_event_hook.lua"))
+    with EngineClient() as e:
+        e.start("BLACK", "GOLD", "TESTSEED")
+        e.call("select")
+        with pytest.raises(RPCError, match="boom inside an event"):
+            e.call("test_crash_event")
+        with pytest.raises(RPCError, match="game in progress was lost"):  # never a silently reset game
+            e.call("gamestate")
+        assert e.restarts == 1
+        e.start("BLACK", "GOLD", "TESTSEED")  # the fresh engine plays on
+        assert [c["key"] for c in e.call("select")["hand"]["cards"]][:3] == ["H_A", "H_K", "D_Q"]
+
+
+def test_bot_profile_comes_from_the_environment(monkeypatch):
+    from balatro_bot.engine.client import engine_env
+
+    monkeypatch.setenv("BOT_PROFILE", "3")
+    assert engine_env()["BOT_PROFILE"] == "3"
+    assert engine_env(profile=2)["BOT_PROFILE"] == "2"
+    monkeypatch.delenv("BOT_PROFILE")
+    assert engine_env()["BOT_PROFILE"] == "2"
