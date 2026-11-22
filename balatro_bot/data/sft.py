@@ -66,6 +66,8 @@ def examples_from_run(run_dir: Path, filters: Filters) -> Iterator[dict]:
         outcome = outcomes.get(custom_id, "unknown")
         if outcomes and outcome not in filters.keep_outcomes:
             continue
+        if "reasoning" in message and "reasoning_content" not in message:  # newer vLLM names it "reasoning"
+            message["reasoning_content"] = message.pop("reasoning")
         if not filters.keep_reasoning:
             message.pop("reasoning_content", None)
         assistant = {k: v for k, v in message.items() if v is not None and k in

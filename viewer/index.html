@@ -514,6 +514,9 @@ function renderRight(s) {
     if (out.reasoning && !reasons.includes(out.reasoning)) reasons.unshift(out.reasoning);
     if (reasons.length) h += `<h3>Reasoning</h3><div class="reason">${esc(reasons.join("\n\n"))}</div>`;
     if (arr(d.tool_calls).length) h += `<h3>Analysis tools (${arr(d.tool_calls).length})</h3>` + arr(d.tool_calls).map((t) => toolHTML(t, s)).join("");
+    const an = obj(d.analysis);
+    if (Object.keys(an).length) h += `<details class="analysis"><summary>Full analysis (record only, not shown to the model)</summary>` +
+      (an.error ? `<div class="err">${esc(an.error)}</div>` : Object.entries(an).map(([name, result]) => toolHTML({ name, result, arguments: {} }, s)).join("")) + `</details>`;
     if (arr(out.tool_calls).length) h += `<details><summary>Model's final answer (training target)</summary><pre class="json">${esc(JSON.stringify(out, null, 2))}</pre></details>`;
     const u = [];
     if (d.model_calls) u.push(`${d.model_calls} model call${d.model_calls > 1 ? "s" : ""}`);
@@ -551,10 +554,18 @@ function toolHTML(t, s) {
   const r = obj(t.result), p = obj(s.params);
   let body;
   if (r.error) body = `<div class="err">${esc(r.error)}</div>`;
-  else if (t.name === "score_plays" && r.plays) {
+  else if (t.name === "score_plays" && r.plays && !arr(r.plays).some((x) => x.money)) {  // what the model sees
     body = `<div class="small muted">needs ${fmt(r.chips_needed)} more · ${fmt(r.hands_left)} hands, ${fmt(r.discards_left)} discards${r.face_down_cards ? ` · face down: ${esc(arr(r.face_down_cards).join(", "))}` : ""}</div>
-      <table><tr><th>Cards</th><th>Hand</th><th>Guaranteed</th><th>Average</th><th>Best case</th></tr>` + arr(r.plays).map((x, i) =>
-      `<tr${i === 0 ? ' class="best"' : ""}><td>${esc(arr(x.cards).join(", "))}</td><td>${esc(x.hand)}</td><td>${fmt(x.min_score)}</td><td>${fmt(x.avg_score)}</td><td>${fmt(x.max_score)}</td></tr>`).join("") + "</table>";
+      <table><tr><th>Cards</th><th>Hand</th><th>Min score</th><th>Max score</th><th>Avg money</th></tr>` + arr(r.plays).map((x, i) =>
+        `<tr${i === 0 ? ' class="best"' : ""}><td>${esc(arr(x.cards).join(", "))}</td><td>${esc(x.hand)}</td><td>${fmt(x.min_score)}</td><td>${fmt(x.max_score)}</td><td class="money">$${fmt(x.avg_money)}</td></tr>`).join("") + "</table>";
+  } else if (t.name === "score_plays" && r.plays) {  // the record's full answer
+    body = `<div class="small muted">needs ${fmt(r.chips_needed)} more · ${fmt(r.hands_left)} hands, ${fmt(r.discards_left)} discards${r.face_down_cards ? ` · face down: ${esc(arr(r.face_down_cards).join(", "))}` : ""}</div>
+      <table><tr><th>Cards</th><th>Hand</th><th>Guaranteed</th><th>Average</th><th>Best case</th><th>Above min</th><th>Money</th><th>Lucky / Glass</th></tr>` + arr(r.plays).map((x, i) => {
+        const m = obj(x.money), lk = obj(x.lucky), gl = obj(x.glass);
+        const luck = [lk.cards ? `Lucky ${esc(arr(lk.cards).join(","))}: mult ${pct(lk.chance_any_mult)}, $ ${pct(lk.chance_any_money)}` : "",
+                      gl.cards ? `Glass ${esc(arr(gl.cards).join(","))}: breaks ${pct(gl.chance_any_breaks)}` : ""].filter(Boolean).join("<br>");
+        return `<tr${i === 0 ? ' class="best"' : ""}><td>${esc(arr(x.cards).join(", "))}</td><td>${esc(x.hand)}</td><td>${fmt(x.min_score)}</td><td>${fmt(x.avg_score)}</td><td>${fmt(x.max_score)}</td>` +
+          `<td>${x.chance_above_min == null ? "" : pct(x.chance_above_min)}</td><td>${m.min != null ? `$${fmt(m.min)}–${fmt(m.max)} (avg ${fmt(m.avg)})` : x.avg_money != null ? `avg $${fmt(x.avg_money)}` : ""}</td><td class="small">${luck}</td></tr>`; }).join("") + "</table>";
   } else if ((t.name === "estimate_clear_chance" || t.name === "round_search") && r.results) {
     const label = (x) => x.action || (x.play ? "play " + arr(x.play).join(", ") : x.discard ? "discard " + arr(x.discard).join(", ") : "?");
     const chosen = ["play", "discard"].includes(s.method) && p.cards ? (t.name === "round_search" ? `${s.method === "play" ? "PlayHand" : "Discard"}(${arr(p.cards).join(", ")})` : `${s.method} ${arr(p.cards).join(", ")}`) : null;

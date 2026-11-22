@@ -31,7 +31,7 @@ from typing import Any
 
 from balatro_bot.agent.recorder import READ_ONLY, Decision, GameRecorder, versions
 from balatro_bot.agent.scoring_trace import trace_play
-from balatro_bot.agent.tools import TOOL_NAMES, Shadow, run_tool, tools_for_state
+from balatro_bot.agent.tools import TOOL_NAMES, Shadow, parse_tools, run_tool, tools_for_state, viewer_analysis
 from balatro_bot.eval.report import error_kind
 
 
@@ -78,6 +78,17 @@ def run_cost(run_dir: Path, prices: Prices) -> dict:
             tok["cached"] += cached_tokens(usage)
             cost += prices.cost(usage)
     return {"tokens": tok, "cost_usd": round(cost, 6)}
+
+
+def reasoning_of(msg) -> str | None:
+    """The model's thinking from a chat message: vLLM's reasoning parser puts it in `reasoning_content`
+    (older versions) or `reasoning` (newer ones)."""
+    extra = getattr(msg, "model_extra", None) or {}
+    for key in ("reasoning_content", "reasoning"):
+        value = getattr(msg, key, None) or extra.get(key)
+        if value:
+            return value
+    return None
 
 
 def same_model(asked: str, served: str) -> bool:
@@ -158,7 +169,7 @@ def _make_bot_class():
             return await self._inner.__aexit__(*exc)
 
     class AgentBot(Bot):
-        def __init__(self, task, config, port: int, *, tools: bool = False, max_steps: int = 2000,
+        def __init__(self, task, config, port: int, *, tools: bool | str = False, max_steps: int = 2000,
                      max_tool_rounds: int = 3, strip_cache_control: bool = True,
                      strategies_dir: Path | None = None, drop_params: tuple[str, ...] = (),
                      budget: Budget | None = None):
@@ -169,7 +180,9 @@ def _make_bot_class():
                 self.model_config.pop(key, None)
             if strategies_dir is not None and (strategies_dir / task.strategy).exists():
                 self.strategy = StrategyManager(task.strategy, strategies_dir=strategies_dir)
-            self.tools_enabled = tools
+            # tools: False (none), True (all), or a parse_tools string ("baseline", "score_plays,optimize_jokers")
+            self.tool_names = set(parse_tools(tools))
+            self.tools_enabled = bool(self.tool_names)
             self.max_steps, self.max_tool_rounds = max_steps, max_tool_rounds
             self.strip_cache_control = strip_cache_control
             self._steps = 0
@@ -230,10 +243,9 @@ def _make_bot_class():
             msg = response.choices[0].message
             calls = getattr(msg, "tool_calls", None) or []
             if self._decision is not None:  # the model's final answer: what a fine-tuned model should produce
-                extra = getattr(msg, "model_extra", None) or {}
                 self._decision.extra["model_output"] = {
                     "content": msg.content,
-                    "reasoning": getattr(msg, "reasoning_content", None) or extra.get("reasoning_content"),
+                    "reasoning": reasoning_of(msg),
                     "tool_calls": [{"name": c.function.name, "arguments": c.function.arguments} for c in calls]}
             if calls and calls[0].function.name in TOOL_NAMES:  # an analysis call when none is offered
                 msg = f"{calls[0].function.name} is not available now: choose a game action"
@@ -315,8 +327,7 @@ def _make_bot_class():
                 d.extra.setdefault("custom_ids", []).append(custom_id)  # links to requests/responses.jsonl
                 msg = response.choices[0].message if response.choices else None
                 if msg is not None:
-                    extra = getattr(msg, "model_extra", None) or {}
-                    d.reasoning.append(getattr(msg, "reasoning_content", None) or extra.get("reasoning_content") or "")
+                    d.reasoning.append(reasoning_of(msg) or "")
                     d.reasoning.append(msg.content or "")
             served = getattr(response, "model", "") or ""
             if not same_model(self.task.model, served):
@@ -326,6 +337,14 @@ def _make_bot_class():
         async def _get_llm_response(self, gamestate: dict[str, Any]):
             t0 = time.perf_counter()
             self._decision = Decision(extra={"state_seen": gamestate.get("state")})
+            if self._shadow is not None and gamestate.get("state") == "SELECTING_HAND":
+                # every tool's answer, for the record only (the model sees just the tools it called)
+                try:
+                    analysis = await asyncio.to_thread(viewer_analysis, self._shadow, gamestate)
+                except Exception as e:  # noqa: BLE001  never let the record's extras stop a game
+                    analysis = {"error": f"{type(e).__name__}: {e}"}
+                if analysis:
+                    self._decision.extra["analysis"] = analysis
             try:
                 return await self._decide(gamestate)
             finally:
@@ -335,7 +354,7 @@ def _make_bot_class():
         async def _decide(self, gamestate: dict[str, Any]):
             messages = self._messages(gamestate)
             game_tools = self.strategy.get_tools(gamestate["state"])
-            local_tools = tools_for_state(gamestate.get("state")) if self.tools_enabled else []
+            local_tools = tools_for_state(gamestate.get("state"), self.tool_names) if self.tools_enabled else []
             for rnd in range(self.max_tool_rounds + 1):
                 offer = bool(local_tools) and rnd < self.max_tool_rounds
                 if local_tools and rnd == self.max_tool_rounds:  # the analysis tools are no longer offered
@@ -344,11 +363,11 @@ def _make_bot_class():
                 response, _ = await self._call_logged(messages, game_tools + (local_tools if offer else []))
                 msg = response.choices[0].message
                 calls = list(getattr(msg, "tool_calls", None) or [])
-                if not offer or not calls or calls[0].function.name not in TOOL_NAMES:
+                if not offer or not calls or calls[0].function.name not in self.tool_names:
                     return response  # a game action (BalatroLLM executes the first call) or none
                 # Answer every analysis call (they may come in parallel); game actions mixed in after
                 # them are dropped from the replayed message, so no tool call is left unanswered.
-                local = [c for c in calls if c.function.name in TOOL_NAMES]
+                local = [c for c in calls if c.function.name in self.tool_names]
                 answers = []
                 for c in local:  # off the event loop: other games keep running meanwhile
                     t_tool = time.perf_counter()
@@ -368,7 +387,7 @@ def _make_bot_class():
                 for key in ("reasoning_content", "reasoning"):  # thinking text: recorded, not sent back
                     assistant.pop(key, None)
                 assistant["tool_calls"] = [tc for tc in assistant.get("tool_calls") or []
-                                           if tc["function"]["name"] in TOOL_NAMES]
+                                           if tc["function"]["name"] in self.tool_names]
                 messages = messages + [assistant, *answers]
             return response
 
@@ -377,7 +396,7 @@ def _make_bot_class():
 
 async def run_games(*, ports: list[int], seeds: list[str], model: str, base_url: str, api_key: str,
                     runs_dir: Path, summary: Path, label: str, deck: str = "BLACK", stake: str = "GOLD",
-                    strategy: str = "default", tools: bool = False, model_config: dict | None = None,
+                    strategy: str = "default", tools: bool | str = False, model_config: dict | None = None,
                     prices: Prices | None = None, max_cost: float = float("inf"), max_steps: int = 2000,
                     strip_cache_control: bool = True, strategies_dir: Path | None = None,
                     drop_params: tuple[str, ...] = (), port_alive=None) -> dict:

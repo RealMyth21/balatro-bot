@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("balatrollm")
 pytest.importorskip("jackdaw")
 
-from balatro_bot.agent.llm_runner import Prices, run_games, same_model  # noqa: E402
+from balatro_bot.agent.llm_runner import Prices, reasoning_of, run_games, same_model  # noqa: E402
 from balatro_bot.agent.mock_llm import start  # noqa: E402
 from balatro_bot.data.sft import Filters, export  # noqa: E402
 from balatro_bot.serve_pool import ServerPool  # noqa: E402
@@ -126,3 +126,12 @@ def test_same_model():
     assert same_model("qwen3-8b", "qwen3-8b-2026-11-01")
     for served in ("qwen3", "qwen", "", "qwen3-8b-mini", "qwen3-4b"):
         assert not same_model("qwen3-8b", served), served
+
+
+def test_thinking_is_read_from_either_vllm_field():
+    from openai.types.chat import ChatCompletionMessage
+
+    old = ChatCompletionMessage.model_validate({"role": "assistant", "content": "x", "reasoning_content": "a"})
+    new = ChatCompletionMessage.model_validate({"role": "assistant", "content": "x", "reasoning": "b"})
+    none = ChatCompletionMessage.model_validate({"role": "assistant", "content": "x"})
+    assert (reasoning_of(old), reasoning_of(new), reasoning_of(none)) == ("a", "b", None)

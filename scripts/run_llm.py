@@ -44,8 +44,11 @@ def main() -> None:
     ap.add_argument("--base-url", default=LOCAL_URL, help="OpenAI-compatible server (default: local vLLM)")
     ap.add_argument("--api-key-env", default="LOCAL_LLM_KEY",
                     help="environment variable holding a key, if the server needs one (a local one doesn't)")
-    ap.add_argument("--tools", action="store_true",
-                    help="enable the analysis tools (exact scores, clear odds, joker and card order)")
+    ap.add_argument("--tools", nargs="?", const="baseline", default=None,
+                    help="analysis tools to offer, comma-separated: score_plays (score preview: min/max score, "
+                         "average money), optimize_jokers, optimize_hand, estimate_clear_chance, or a set: "
+                         "baseline (= score_plays; the default with a bare --tools), all, none. Records get every "
+                         "tool's answer either way")
     ap.add_argument("--backend", default="engine", choices=["engine", "jackdaw"])
     ap.add_argument("--parallel", type=int, default=4)
     ap.add_argument("--split", default="dev", choices=["dev", "heldout", "smoke"])
@@ -68,6 +71,13 @@ def main() -> None:
     ap.add_argument("--summary", type=Path, default=Path("runtime/eval/llm.jsonl"))
     ap.add_argument("--runs-dir", type=Path, default=Path("runtime/llm_runs"))
     args = ap.parse_args()
+    if args.tools:
+        from balatro_bot.agent.tools import parse_tools
+
+        try:
+            args.tools = ",".join(parse_tools(args.tools)) or None
+        except ValueError as e:
+            ap.error(str(e))
 
     try:
         import balatrollm  # noqa: F401
@@ -76,7 +86,7 @@ def main() -> None:
     except ImportError:
         sys.exit("BalatroLLM is not installed: uv sync --extra llm (see README)")
 
-    label = args.label or ("mock" if args.mock else args.model) + ("-tools" if args.tools else "")
+    label = args.label or ("mock" if args.mock else args.model) + (f"-tools-{args.tools}" if args.tools else "")
     mock_httpd = None
     if args.mock:
         from balatro_bot.agent.mock_llm import start
@@ -99,7 +109,7 @@ def main() -> None:
             out = asyncio.run(run_games(
                 ports=pool.ports, seeds=seed_list, model=args.model if not args.mock else "mock-model",
                 base_url=base_url, api_key=api_key, runs_dir=args.runs_dir, summary=args.summary, label=label,
-                deck=args.deck, stake=args.stake, strategy=args.strategy, tools=args.tools,
+                deck=args.deck, stake=args.stake, strategy=args.strategy, tools=args.tools or False,
                 model_config=json.loads(args.model_config),
                 prices=Prices(args.price_in, args.price_out, args.price_cached), max_cost=args.max_cost,
                 max_steps=args.max_steps, strip_cache_control=not args.keep_cache_control,

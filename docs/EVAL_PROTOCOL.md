@@ -33,11 +33,14 @@ How precise a win rate is (95% interval half-width, at a true rate of 5%):
 | 1000 | ~1.4 pts |
 
 ## Arms
-1. `<model>-notools`: BalatroLLM's default strategy, game actions only.
-2. `<model>-tools`: the same, plus while playing a hand `score_plays`, `estimate_clear_chance`,
-   `optimize_jokers` and `optimize_hand` (`balatro_bot/agent/tools.py`). No tool helps with shop and
-   pack decisions: those stay the model's own reasoning. Scores are given as guaranteed minimum, best case and average over
-   redrawn futures, never the actual roll.
+1. `<model>-baseline`: BalatroLLM's default strategy, game actions, and while playing a hand the score
+   preview `score_plays` (minimum and maximum score and average money of the best plays, like a
+   calculator a player could use). `scripts/run_baseline.sh`.
+2. Other arms switch tools on or off (`--tools`, `TOOLS=` in `scripts/run_baseline.sh`): `none` (game
+   actions only, comparable to public BalatroLLM results), or any of `optimize_jokers`, `optimize_hand`,
+   `estimate_clear_chance` (`balatro_bot/agent/tools.py`). `estimate_clear_chance` is a search, not a
+   calculator: report arms with it as LLM + search. No tool helps with shop and pack decisions: those
+   stay the model's own reasoning. No tool ever reveals the actual upcoming roll.
 
 3. Baselines: jackdaw `smart`, `search` (`balatro_bot/search`), `random`.
 

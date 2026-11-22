@@ -1,5 +1,9 @@
 # Running the bot on your GPU (instructions for the person running it)
 
+> For the baseline, the preferred setup runs the games on the real game on another computer and only the
+> model here: see [REMOTE_GPU.md](REMOTE_GPU.md). This page runs everything here on the jackdaw
+> simulator, whose prompts lack the card text.
+
 Thanks for lending your GPU. One script does everything: it installs what it needs, runs an AI model
 on your GPU, has it play Balatro in a simulator, and packs the results into one file for you to send
 back. You don't need Balatro or any account. Nothing is installed system-wide except `uv` (a Python
@@ -44,7 +48,7 @@ Put them before the command, e.g. `N=50 PARALLEL=6 bash scripts/gpu/run_on_gpu.s
 | `THINKING` | 1 | `THINKING=0`: Qwen3 answers without thinking first (faster, usually weaker) |
 | `VLLM_ARGS` | (none) | extra flags for the model server, e.g. `VLLM_ARGS="--enforce-eager"` |
 | `VLLM_SPEC` | `vllm` | which vLLM to install; pin a version that worked, e.g. `VLLM_SPEC="vllm==0.11.0"` |
-| `ARMS` | `notools tools` | configurations to play: game actions only, and with analysis tools |
+| `ARMS` | `notools tools` | configurations to play: game actions only, and with the score preview tool |
 | `SPLIT` | `dev` | which fixed list of game seeds to use |
 | `GPU_MEM` | `0.90` | share of GPU memory the model server may use |
 | `MOCK` | 0 | `MOCK=1`: test the whole flow with a fake model, no GPU needed |

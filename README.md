@@ -21,9 +21,12 @@ Tools for building and evaluating Balatro bots, with a focus on **exactness**:
   (tested). Runs many games in parallel and reports win rates with confidence intervals.
 - **LLM pipeline** (`scripts/run_llm.py`): plays games through
   [BalatroLLM](https://github.com/coder/balatrollm) against those servers in parallel, with:
-  - optional analysis tools for the model, answering only from what a player can see:
-    - while playing a hand: exact scores (guaranteed, best case, average), the chance to clear the blind,
-      the best joker order and the best order to play cards in (`optimize_jokers`, `optimize_hand`);
+  - analysis tools for the model, each switched on or off per run (`--tools`), answering only from what
+    a player can see, and only while playing a hand:
+    - `score_plays`, the score preview (the baseline's only tool): minimum and maximum score and average
+      money for the best plays;
+    - optional: the best joker order and card order (`optimize_jokers`, `optimize_hand`) and the chance
+      to clear the blind (`estimate_clear_chance`, a search rather than a calculator);
     - shop and pack decisions are left to the model's own judgment;
   - a check that the server served the requested model;
   - token accounting (and costs with a budget cap, if a paid server is ever used);
@@ -108,7 +111,8 @@ uv run python scripts/eval_fast.py --policy smart search --n 400 --workers 6    
 uv run python scripts/serve.py --backend engine --n 8                               # 8 game servers
 uv run python scripts/run_llm.py --mock --n 4 --parallel 4                          # LLM pipeline, mock model
 uv run python scripts/run_llm.py --model Qwen/Qwen3-8B --n 10                       # model served on the local GPU (vLLM)
-bash scripts/gpu/run_on_gpu.sh                                                     # all of it on an NVIDIA GPU (docs/GPU_RUN.md)
+bash scripts/run_baseline.sh                                                       # LLM baseline: real game here, model on a remote GPU (docs/REMOTE_GPU.md)
+bash scripts/gpu/run_on_gpu.sh                                                     # all of it on an NVIDIA GPU, simulator games (docs/GPU_RUN.md)
 uv run python scripts/export_sft.py --min-ante 3                                    # fine-tuning dataset
 uv run python scripts/rl_ppo.py fetch                                               # jackdaw's PPO examples
 uv run python scripts/rl_ppo.py train --deck BLACK --stake GOLD -- --timesteps 2000000

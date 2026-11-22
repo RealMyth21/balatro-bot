@@ -65,7 +65,7 @@ def test_card_order_found_and_true():
 
 def test_average_sits_between_guaranteed_and_best_case():
     g = _game([{"key": "H_7", "enhancement": "LUCKY"}, {"key": "S_7", "enhancement": "LUCKY"}])
-    plays = score_plays(g, top=20)["plays"]
+    plays = score_plays(g, top=20, detail=True)["plays"]  # the record's full answer has the average score
     assert all(p["min_score"] <= p["avg_score"] <= p["max_score"] for p in plays)
     assert any(p["min_score"] < p["max_score"] for p in plays)  # the Lucky cards make some plays uncertain
 
@@ -91,3 +91,26 @@ def test_offered_while_playing_a_hand():
     assert {"optimize_jokers", "optimize_hand"} <= names
     for state in ("SHOP", "SMODS_BOOSTER_OPENED", "BLIND_SELECT"):  # shop and pack choices are the model's own
         assert tools_for_state(state) == []
+
+
+def test_tool_switches():
+    from balatro_bot.agent.tools import TOOL_NAMES, parse_tools
+
+    assert parse_tools("baseline") == ("score_plays",)
+    assert parse_tools("none") == () and parse_tools(None) == () and parse_tools(False) == ()
+    assert set(parse_tools("all")) == TOOL_NAMES == set(parse_tools(True))
+    assert parse_tools("score_plays, optimize_jokers,score_plays") == ("score_plays", "optimize_jokers")
+    with pytest.raises(ValueError):
+        parse_tools("score_plays,bogus")
+
+
+def test_score_preview_shows_min_max_and_average_money():
+    g = _game([{"key": "H_7", "enhancement": "LUCKY"}, {"key": "S_7", "enhancement": "LUCKY"},
+               {"key": "D_7", "enhancement": "LUCKY"}])
+    lucky = {i for i, c in enumerate(g.hand) if c.key == "m_lucky"}
+    plays = score_plays(g, top=20)["plays"]
+    assert all(set(p) == {"cards", "hand", "min_score", "max_score", "avg_money"} for p in plays)
+    three = next(p for p in plays if lucky <= set(p["cards"]))
+    assert three["avg_money"] == pytest.approx(3 * 20 / 15, abs=0.8)  # each Lucky card: $20 one time in 15
+    detail = score_plays(g, top=20, detail=True)["plays"]
+    assert all({"avg_score", "money"} <= set(p) for p in detail)  # the record keeps the full answer

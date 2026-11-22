@@ -3,18 +3,18 @@
 The game itself runs on any backend (normally our exact engine, which provides real description text).
 A jackdaw shadow run receives every request in lockstep (shown identical to the engine) and powers:
 
-  score_plays           exact score range of the best plays: the guaranteed minimum and the maximum
-                        over chance effects (Lucky cards, Glass breaks, Bloodstone, ...). Never reveals
-                        the actual upcoming rolls.
+  score_plays           score preview of the best plays: the guaranteed minimum and the maximum score
+                        over chance effects (Lucky cards, Glass breaks, Bloodstone, ...) and the average
+                        money each play makes. Never reveals the actual upcoming rolls.
   estimate_clear_chance chance to clear the current blind for candidate plays/discards, over worlds
                         with the unseen deck reshuffled and all randomness resampled (no seed peeking).
 
   optimize_jokers       the joker order that makes the best play score most, and the rearrange to apply it
   optimize_hand         the best plays with the order their cards should score in (and the rearrange)
 
-All scores are given as guaranteed minimum, best case and average (over redrawn futures), never the
-actual upcoming roll. All of them are offered while choosing a play or discard (tools_for_state); shop
-and pack decisions are left entirely to the model.
+Each tool can be switched on or off (parse_tools): the baseline offers only score_plays; shop and pack
+decisions are left entirely to the model. Tools are offered only while choosing a play or discard
+(tools_for_state). Scores are never the actual upcoming roll.
 
 Both answer only from what the player sees (the prompt shows face-down cards as "face down"): with
 face-down cards in hand, scores are averages over what those cards could be, and hand types of plays
@@ -37,11 +37,12 @@ HAND_STATES = ("SELECTING_HAND",)
 TOOL_SCHEMAS: list[dict] = [
     {"type": "function", "function": {
         "name": "score_plays",
-        "description": ("Exact score range for the best plays from your current hand, including all jokers, "
+        "description": ("Score preview for the best plays from your current hand, including all jokers, "
                         "enhancements, editions, seals and the boss blind. Returns up to `top` plays with card "
-                        "indices (0-based, hand order), hand type, guaranteed minimum, best-case and average score, "
-                        "plus the chips still needed to clear the blind. With face-down cards in hand, scores "
-                        "are averages over what those cards could be. Does not take an action."),
+                        "indices (0-based, hand order), hand type, the minimum score (guaranteed), the maximum "
+                        "score (if every chance effect such as Lucky cards goes your way) and the average money "
+                        "the play makes, plus the chips still needed to clear the blind. With face-down cards in "
+                        "hand, scores are averages over what those cards could be. Does not take an action."),
         "parameters": {"type": "object", "properties": {
             "top": {"type": "integer", "minimum": 1, "maximum": 20, "description": "how many plays to return"}},
             "required": []}}},
@@ -78,13 +79,38 @@ TOOL_SCHEMAS += [
             "required": []}}},
 ]
 TOOL_NAMES = {t["function"]["name"] for t in TOOL_SCHEMAS}
+# Which tools the model is offered: named sets, or any comma-separated list of tool names (parse_tools).
+# Every tool's answer is still computed for the game record (viewer_analysis), never shown to the model.
+TOOLSETS = {"none": (), "baseline": ("score_plays",), "all": tuple(sorted(TOOL_NAMES))}
+
+
+def parse_tools(spec) -> tuple[str, ...]:
+    """The tools to offer: None/False/"" -> none, True -> all, or a string of comma-separated set names
+    and tool names, e.g. "baseline", "score_plays,optimize_jokers", "all"."""
+    if not spec:
+        return ()
+    if spec is True:
+        return TOOLSETS["all"]
+    names: list[str] = []
+    for part in str(spec).replace(" ", "").split(","):
+        if not part:
+            continue
+        if part in TOOLSETS:
+            names += TOOLSETS[part]
+        elif part in TOOL_NAMES:
+            names.append(part)
+        else:
+            raise ValueError(f"unknown tool or tool set {part!r}: use {', '.join(sorted(TOOLSETS))} or "
+                             f"{', '.join(sorted(TOOL_NAMES))}")
+    return tuple(dict.fromkeys(names))
 _STATES = {"score_plays": HAND_STATES, "estimate_clear_chance": HAND_STATES, "optimize_jokers": HAND_STATES,
            "optimize_hand": HAND_STATES}
 
 
-def tools_for_state(state: str | None) -> list[dict]:
-    """The analysis tools that apply in this game state."""
-    return [t for t in TOOL_SCHEMAS if state in _STATES[t["function"]["name"]]]
+def tools_for_state(state: str | None, names=None) -> list[dict]:
+    """The analysis tools that apply in this game state (only `names`, if given)."""
+    return [t for t in TOOL_SCHEMAS if state in _STATES[t["function"]["name"]]
+            and (names is None or t["function"]["name"] in names)]
 
 
 class Shadow:
@@ -143,7 +169,72 @@ def _blind_info(game) -> dict:
     return info
 
 
-def score_plays(game, top: int = 8, worlds: int = 8, seed: int = 0) -> dict:
+def _chance_info(game, cores: list, avg_cores: list, cards: tuple) -> dict:
+    """Money (guaranteed / best / average) and the Lucky and Glass odds of one play, from what the
+    player sees: `cores` are the real game (nothing hidden) or worlds with face-down cards redrawn,
+    `avg_cores` worlds with all randomness redrawn."""
+    from jackdaw.core import Game
+
+    def money(cs, rolls):
+        vals = []
+        for c in cs:
+            try:
+                vals.append(Game(c).preview_play(cards, rolls=rolls).dollars)
+            except Exception:  # noqa: BLE001  an illegal play
+                return None
+        return round(sum(vals) / len(vals), 2) if vals else None
+
+    out = {"money": {"min": money(cores, "low"), "max": money(cores, "high"), "avg": money(avg_cores, None)}}
+    scoring = game._g.scoring_cards(list(cards))
+    hand = game.hand
+    pos = [i for i in (scoring[1] if scoring else []) if not hand[i].face_down]
+    oops = 2 ** sum(1 for j in game.jokers if j.key == "j_oops")  # Oops! All 6s doubles every chance
+    lucky = [i for i in pos if hand[i].key == "m_lucky" and not hand[i].debuff]
+    glass = [i for i in pos if hand[i].key == "m_glass" and not hand[i].debuff]
+    if lucky:
+        pm, pd = min(1.0, oops / 5), min(1.0, oops / 15)
+        out["lucky"] = {"cards": lucky, "chance_mult_each": round(pm, 3), "chance_money_each": round(pd, 3),
+                        "chance_any_mult": round(1 - (1 - pm) ** len(lucky), 3),
+                        "chance_any_money": round(1 - (1 - pd) ** len(lucky), 3)}
+    if glass:
+        pb = min(1.0, oops / 4)
+        out["glass"] = {"cards": glass, "chance_break_each": round(pb, 3),
+                        "chance_any_breaks": round(1 - (1 - pb) ** len(glass), 3)}
+    return out
+
+
+# Futures (unseen deck reshuffled, every chance roll redrawn) behind the average money and the chance
+# of beating the minimum: 512 keeps the average money within ~$0.40 for three Lucky cards, in ~0.5 s.
+AVG_WORLDS = 512
+
+
+def _avg_cores(game, worlds: int, seed: int) -> list:
+    from balatro_bot.search.round_search import WorldSampler
+
+    sampler = WorldSampler(game)
+    rng = random.Random(seed + 7919)
+    return [sampler.sample_core(rng) for _ in range(worlds)]
+
+
+def _beats_min(avg_cores: list, cards: tuple, low: float) -> float | None:
+    from balatro_bot.search.round_search import _preview_total
+
+    totals = [_preview_total(c, cards, None) for c in avg_cores]
+    if any(t is None for t in totals):
+        return None
+    return round(sum(t > low + 1e-6 for t in totals) / len(totals), 3)
+
+
+def _preview(play: dict, detail: bool) -> dict:
+    """What the model sees of one play: cards, hand, minimum and maximum score, average money. The
+    record (detail) keeps everything: average score, money range, Lucky/Glass odds."""
+    if detail:
+        return play
+    return {"cards": play["cards"], "hand": play["hand"], "min_score": play["min_score"],
+            "max_score": play["max_score"], "avg_money": play["money"]["avg"]}
+
+
+def score_plays(game, top: int = 8, worlds: int = 8, seed: int = 0, detail: bool = False) -> dict:
     from balatro_bot.search.optimize import average_scores
     from balatro_bot.search.round_search import WorldSampler, has_hidden, ranked_plays, visible_ranked_plays
 
@@ -152,10 +243,13 @@ def score_plays(game, top: int = 8, worlds: int = 8, seed: int = 0) -> dict:
     if not has_hidden(game):
         ranked = ranked_plays(game, rolls="low")[:top]
         avg = average_scores(game, [c for _, c in ranked], seed=seed)
+        avg_cores = _avg_cores(game, AVG_WORLDS, seed)
         for score, cards in ranked:
             high = game.preview_play(cards, rolls="high")
-            plays.append({"cards": list(cards), "hand": high.hand_type, "min_score": score,
-                          "max_score": high.total, "avg_score": avg.get(cards)})
+            plays.append(_preview({"cards": list(cards), "hand": high.hand_type, "min_score": score,
+                                   "max_score": high.total, "avg_score": avg.get(cards),
+                                   "chance_above_min": _beats_min(avg_cores, cards, score),
+                                   **_chance_info(game, [game._g], avg_cores, cards)}, detail))
         return {**_blind_info(game), "plays": plays}
     # Face-down cards: score over sampled identities (the same worlds for both bounds), and give the
     # hand type only for plays made of face-up cards (it does not depend on the hidden ones).
@@ -166,12 +260,15 @@ def score_plays(game, top: int = 8, worlds: int = 8, seed: int = 0) -> dict:
     low = visible_ranked_plays(game, rng, worlds, rolls="low", cores=cores)
     high = dict((c, s) for s, c in visible_ranked_plays(game, rng, worlds, rolls="high", cores=cores))
     avg = average_scores(game, [c for _, c in low[:top]], seed=seed)
+    avg_cores = _avg_cores(game, AVG_WORLDS, seed)
     for score, cards in low[:top]:
         known = not face_down.intersection(cards)
-        plays.append({"cards": list(cards),
-                      "hand": game.preview_play(cards, rolls="low").hand_type if known else "unknown (face-down cards)",
-                      "min_score": round(score, 1), "max_score": round(high.get(cards, score), 1),
-                      "avg_score": avg.get(cards)})
+        plays.append(_preview({
+            "cards": list(cards),
+            "hand": game.preview_play(cards, rolls="low").hand_type if known else "unknown (face-down cards)",
+            "min_score": round(score, 1), "max_score": round(high.get(cards, score), 1),
+            "avg_score": avg.get(cards), "chance_above_min": _beats_min(avg_cores, cards, score),
+            **_chance_info(game, cores, avg_cores, cards)}, detail))
     return {**_blind_info(game), "plays": plays,
             "note": f"scores are averages over {worlds} possibilities for the face-down cards"}
 
@@ -207,8 +304,21 @@ def estimate_clear_chance(game, candidates: list[dict] | None = None, worlds: in
     return {**_blind_info(game), "worlds": worlds, "results": results}
 
 
-def run_tool(shadow: Shadow, view: dict, name: str, arguments: str | dict) -> str:
-    """Execute a tool call; always returns a JSON string for the tool message."""
+def viewer_analysis(shadow: Shadow, view: dict) -> dict | None:
+    """The detailed analysis of a hand decision for the game record (viewer and training data), never
+    shown to the model: every tool's answer, the clear-chance search included."""
+    if view.get("state") not in HAND_STATES:
+        return None
+    out = {}
+    for name, args in (("score_plays", {"top": 10}), ("estimate_clear_chance", {}), ("optimize_jokers", {}),
+                       ("optimize_hand", {})):
+        out[name] = json.loads(run_tool(shadow, view, name, args, detail=True))
+    return out
+
+
+def run_tool(shadow: Shadow, view: dict, name: str, arguments: str | dict, detail: bool = False) -> str:
+    """Execute a tool call; always returns a JSON string for the tool message. detail: the full answer
+    for the game record (score_plays adds average score, money range and Lucky/Glass odds)."""
     try:
         args = json.loads(arguments) if isinstance(arguments, str) else dict(arguments or {})
     except json.JSONDecodeError:
@@ -222,7 +332,7 @@ def run_tool(shadow: Shadow, view: dict, name: str, arguments: str | dict) -> st
     game = shadow.sim.game
     try:
         if name == "score_plays":
-            return json.dumps(score_plays(game, args.get("top", 8)))
+            return json.dumps(score_plays(game, args.get("top", 8), detail=detail))
         if name in ("optimize_jokers", "optimize_hand"):
             from balatro_bot.search.optimize import optimize_hand, optimize_jokers
 

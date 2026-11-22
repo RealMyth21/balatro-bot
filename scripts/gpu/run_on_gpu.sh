@@ -24,7 +24,7 @@ GPU_MEM="${GPU_MEM:-0.90}"                      # share of GPU memory vLLM may u
 N="${N:-20}"                                    # games per arm
 PARALLEL="${PARALLEL:-4}"                       # games at once (24 GB GPU + 7-8B model: 4-8)
 SPLIT="${SPLIT:-dev}"                           # seed list: dev (tuning) or heldout (final numbers)
-ARMS="${ARMS:-notools tools}"                   # notools: game actions only; tools: + analysis tools
+ARMS="${ARMS:-notools tools}"                   # notools: game actions only; tools: + the score preview (score_plays)
 PORT="${PORT:-8000}"
 MOCK="${MOCK:-0}"
 
