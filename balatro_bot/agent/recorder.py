@@ -3,9 +3,12 @@
 Every line is one JSON object with a "type":
   header  schema version, seed, deck, stake, who played (model or policy), settings and versions
   state   the game state at the start (balatrobot's gamestate view)
-  step    one request sent to the game, in order: who decided it ("llm", "policy" or "auto"), the
-          method and params, the resulting game state (or the error), timing, and for decisions the
-          reasoning, every analysis-tool call with its arguments and full result, tokens and cost
+  step    one request sent to the game, in order: who decided it ("llm", "policy", "auto" or
+          "assist"), the method and params, the resulting game state (or the error), timing; for a
+          played hand how it scored (`scoring`: hand, level, chips x mult, the cards that scored and
+          every scoring event); for decisions the reasoning, every analysis-tool call with its full
+          result, the model's final output (`model_output`, the training target), tokens and cost,
+          and the ids of the exact prompts in BalatroLLM's requests.jsonl (`custom_ids`)
   note    a decision that sent nothing to the game (e.g. the model answered without a valid action)
   end     the outcome (won, ante, round), errors, total cost and time
 
@@ -75,14 +78,16 @@ class GameRecorder:
         self._write({"type": "state", "t": round(time.time() - self._t0, 3), "state": view})
 
     def step(self, method: str, params: dict | None, *, result: dict | None = None, error: dict | None = None,
-             actor: str = "auto", decision: Decision | dict | None = None, seconds: float | None = None) -> None:
+             actor: str = "auto", decision: Decision | dict | None = None, seconds: float | None = None,
+             **extra: Any) -> None:
         if method in READ_ONLY:
             return
         if isinstance(decision, Decision):
             decision = decision.as_dict()
         self._write({"type": "step", "i": self._i, "t": round(time.time() - self._t0, 3), "actor": actor,
                      "method": method, "params": _jsonable(params or {}), "result": result, "error": error,
-                     "seconds": None if seconds is None else round(seconds, 3), "decision": decision})
+                     "seconds": None if seconds is None else round(seconds, 3), "decision": decision,
+                     **{k: _jsonable(v) for k, v in extra.items() if v is not None}})
         self._i += 1
 
     def note(self, text: str, decision: Decision | dict | None = None) -> None:

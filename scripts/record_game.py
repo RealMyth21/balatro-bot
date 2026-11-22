@@ -22,6 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from balatro_bot.agent.recorder import GameRecorder, versions  # noqa: E402
+from balatro_bot.agent.scoring_trace import trace_play  # noqa: E402
 from balatro_bot.eval.seeds import seeds  # noqa: E402
 
 
@@ -98,10 +99,11 @@ def record(seed: str, policy: str, backend: str, deck: str, stake: str, out: Pat
                 rec.note(f"{_action_str(action)} has no balatrobot request; stopping", decision)
                 break
             method, params = req
+            scoring = trace_play(g, (params or {}).get("cards") or []) if method == "play" else None
             t = time.perf_counter()
             view = send(method, params or None)
             rec.step(method, params or {}, result=view, actor="policy", decision=decision,
-                     seconds=time.perf_counter() - t)
+                     seconds=time.perf_counter() - t, scoring=scoring)
         summary = {"won": bool(view.get("won")), "ante": view.get("ante_num"), "round": view.get("round_num"),
                    "error": None, "seconds": round(time.perf_counter() - t0, 1)}
     except Exception as e:  # noqa: BLE001  keep what was recorded

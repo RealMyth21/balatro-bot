@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from balatro_bot.agent.recorder import READ_ONLY, Decision, GameRecorder, versions
+from balatro_bot.agent.scoring_trace import trace_play
 from balatro_bot.agent.tools import TOOL_NAMES, Shadow, run_tool, tools_for_state
 from balatro_bot.eval.report import error_kind
 
@@ -120,12 +121,19 @@ def _make_bot_class():
 
     class RecordingClient:
         """Forwards to BalatroLLM's game client; records every request in the game record and mirrors
-        the ones the game accepted to the analysis tools' jackdaw shadow (when tools are on)."""
+        the ones the game accepted to a jackdaw shadow (used by the analysis tools, and for the
+        scoring breakdown of played hands in the record)."""
 
         def __init__(self, inner, bot, shadow: Shadow | None):
             self._inner, self._bot, self._shadow = inner, bot, shadow
 
         async def call(self, method: str, params: dict | None = None):
+            scoring = None
+            if method == "play" and self._shadow is not None and self._shadow.ok:
+                try:  # how this play scores, from the shadow's identical copy of the game
+                    scoring = trace_play(self._shadow.sim.game, list((params or {}).get("cards") or []))
+                except Exception:  # noqa: BLE001  malformed cards: the game will refuse the play anyway
+                    scoring = None
             t0 = time.perf_counter()
             try:
                 result = await self._inner.call(method, params)
@@ -139,7 +147,8 @@ def _make_bot_class():
                 raise
             if self._shadow is not None:
                 self._shadow.apply(method, params)
-            self._bot._record_step(method, params, result=result, seconds=time.perf_counter() - t0)
+            self._bot._record_step(method, params, result=result, seconds=time.perf_counter() - t0,
+                                   scoring=scoring)
             return result
 
         async def __aenter__(self):
@@ -175,13 +184,13 @@ def _make_bot_class():
 
         async def __aenter__(self):
             await super().__aenter__()
-            if self.tools_enabled:
-                self._shadow = Shadow()
+            self._shadow = Shadow()  # always: the record's scoring breakdowns come from it too
             self._balatro = RecordingClient(self._balatro, self, self._shadow)
             return self
 
         # -- the game record ------------------------------------------------------------------
-        def _record_step(self, method: str, params: dict | None, *, result=None, error=None, seconds=None) -> None:
+        def _record_step(self, method: str, params: dict | None, *, result=None, error=None, seconds=None,
+                         scoring=None) -> None:
             if method in READ_ONLY:  # reads (e.g. after an invalid answer) neither are steps nor use the decision
                 return
             if self.recorder is None:
@@ -193,7 +202,7 @@ def _make_bot_class():
                 decision, actor, self._decision = self._decision, "llm", None
             clean = {k: v for k, v in (params or {}).items() if k != "reasoning"}
             self.recorder.step(method, clean, result=result, error=error, actor=actor, decision=decision,
-                               seconds=seconds)
+                               seconds=seconds, scoring=scoring)
 
         # -- outcomes for the fine-tuning exporter ---------------------------------------------
         def _outcome(self, outcome: str, **extra) -> None:
@@ -218,7 +227,14 @@ def _make_bot_class():
             if self._steps > self.max_steps:
                 raise BotError(f"step cap reached ({self.max_steps} actions)")
             self._recorded = False
-            calls = getattr(response.choices[0].message, "tool_calls", None) or []
+            msg = response.choices[0].message
+            calls = getattr(msg, "tool_calls", None) or []
+            if self._decision is not None:  # the model's final answer: what a fine-tuned model should produce
+                extra = getattr(msg, "model_extra", None) or {}
+                self._decision.extra["model_output"] = {
+                    "content": msg.content,
+                    "reasoning": getattr(msg, "reasoning_content", None) or extra.get("reasoning_content"),
+                    "tool_calls": [{"name": c.function.name, "arguments": c.function.arguments} for c in calls]}
             if calls and calls[0].function.name in TOOL_NAMES:  # an analysis call when none is offered
                 msg = f"{calls[0].function.name} is not available now: choose a game action"
                 if self._decision is not None and self.recorder is not None:

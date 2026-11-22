@@ -126,21 +126,36 @@ BalatroLLM isn't on PyPI; the `llm` extra installs it from its v1.1.1 git tag (c
 
 Every LLM game writes `record.jsonl` next to BalatroLLM's logs (`runtime/llm_runs/...`): one line per
 request sent to the game, in order, with who decided it (the model, a policy or the harness), the
-resulting game state, and for model decisions the reasoning, every analysis tool call with its full
-result, tokens and cost. Records are written as the game goes, so a game in progress can be opened.
+resulting game state, for each played hand how it scored (hand, level, chips x mult, which cards scored
+and every joker/card/edition effect in order, computed on an identical copy of the game), and for model
+decisions the reasoning, every analysis tool call with its full result, the model's final answer (the
+target for fine-tuning), tokens, and the ids of the exact prompts in BalatroLLM's `requests.jsonl`.
+Records are written as the game goes, so a game in progress can be opened.
 
 ```bash
 uv run python scripts/record_game.py --policy search --assist-money 60 --assist-chips   # record a bot game
 uv run python scripts/view_record.py                                                    # open the viewer
 ```
 
-The viewer (`viewer/index.html`, no dependencies) shows a timeline of the run by ante with money and
-score, the board before each step (blinds, jokers, consumables, hand, shop, packs, the remaining deck as
-counts, hand levels), the action and what it changed, and the reasoning and tool results as tables.
-Keys: `←`/`→` step, `Shift` jumps between decisions, `[`/`]` between blinds, `N` writes a note. Notes stay
-in your browser and can be exported. The page also opens a record dropped onto it, without the script.
-Run-history ideas (ante-by-ante stepping, notes on steps, files readable while the run is live) follow
-[Antelytics](https://thunderstore.io/c/balatro/p/Chrono/Antelytics/); no code is shared.
+The viewer (`viewer/index.html`, no dependencies) is laid out like a run-history mod:
+- **left:** the run (won/lost, assisted, seed, player) and every action in plain words, grouped by blind
+  and shop ("Played Flush +852", "Bought Blueprint −$10"), with search;
+- **middle:** what happened (for a hand: `chips × mult = score`, the cards with the non-scoring ones faded,
+  and a step-by-step scoring table), then the board before the action: money, hands, discards, blind
+  progress, the three blinds with effects and skip tags, jokers and consumables with their effects,
+  editions and stickers, the hand as cards, shop/packs/voucher with prices, the deck as counts, hand levels;
+- **right:** who decided (model, bot, assist or the harness), the reasoning, each analysis tool's answer as
+  a table with the chosen option marked, the model's final answer, tokens and time, invalid answers, and
+  your own notes;
+- **Summary** (`S`): result, a blind-by-blind table (target, scored, best hand, hands and discards used),
+  money over the run, best hands, final build and vouchers, every shop, jokers bought and sold, and model
+  statistics.
+
+Keys: `↑`/`↓` step, `Shift` jumps between decisions, `[`/`]` between blinds and shops, `S` summary,
+`N` note, `/` search. Notes stay in your browser and can be exported. The page also opens a record
+dropped onto it (`.jsonl` or `.jsonl.gz`), without the script. The layout takes ideas from
+[Antelytics](https://thunderstore.io/c/balatro/p/Chrono/Antelytics/) (made for multiplayer; this one is
+for single-player runs); no code or art is shared.
 
 ## Things worth knowing
 

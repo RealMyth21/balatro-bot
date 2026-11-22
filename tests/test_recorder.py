@@ -51,6 +51,16 @@ def test_record_script_plays_a_full_game(tmp_path: Path):
     assert steps[0]["method"] == "start" and all(s["result"] for s in steps)
     assert lines[-1]["ante"] == steps[-1]["result"]["ante_num"]
     assert {s["actor"] for s in steps} <= {"auto", "policy"} and any(s["actor"] == "policy" for s in steps)
+    # each play's scoring breakdown is what the game scored: the round's chips go up by its total
+    prev = None
+    for s in steps:
+        if s["method"] == "play":
+            sc = s["scoring"]
+            assert sc["hand"] and sc["events"] and sc["chips"] * sc["mult"] == pytest.approx(sc["total"], rel=1e-9)
+            after = s["result"]["round"]["chips"] if s["result"]["state"] == "SELECTING_HAND" else None
+            if after is not None and prev is not None:
+                assert after - prev["round"]["chips"] == pytest.approx(sc["total"])
+        prev = s["result"]
 
 
 def test_viewer_server_serves_only_viewer_and_records():

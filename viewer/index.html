@@ -6,121 +6,174 @@
 <title>Balatro Game Viewer</title>
 <style>
 :root {
-  --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1f24; --muted: #6b6f78; --line: #e3e1da; --accent: #3a5bd9;
-  --llm: #3a5bd9; --policy: #7a4fd0; --auto: #9aa0a8; --assist: #d08a2e; --err: #d1433a; --ok: #2e8b57;
-  --hearts: #d1433a; --diamonds: #d9822b; --clubs: #2a6f97; --spades: #2b2f36; --chip: #f2f0ea;
+  --bg: #161d22; --panel: #1f282f; --panel2: #27323a; --raise: #2f3c45; --line: #36444e; --ink: #ecf1f3; --muted: #8fa1ab;
+  --chips: #2f9bf0; --mult: #f0504a; --money: #f4b63a; --green: #47c08a; --red: #f0504a; --orange: #f08a24;
+  --llm: #a77cf0; --policy: #7a8cf0; --auto: #6c7c86; --assist: #f08a24;
+  --tarot: #8f5fd0; --planet: #3f86e0; --spectral: #2fb0bf; --joker: #4a3a5e; --voucher: #c9762a; --booster: #3d9a6a;
+  --face: #f6f2e8; --hearts: #e0413a; --diamonds: #ea8414; --clubs: #2c6aa6; --spades: #3d3768;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #15171b; --panel: #1e2126; --ink: #e8e8ea; --muted: #9aa0a8; --line: #2d3138; --accent: #7d97ff;
-    --llm: #7d97ff; --policy: #b08cff; --auto: #6b7078; --spades: #d6d9de; --clubs: #5fb0d8; --chip: #262a30;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #15171b; --panel: #1e2126; --ink: #e8e8ea; --muted: #9aa0a8; --line: #2d3138; --accent: #7d97ff;
-  --llm: #7d97ff; --policy: #b08cff; --auto: #6b7078; --spades: #d6d9de; --clubs: #5fb0d8; --chip: #262a30;
-}
 * { box-sizing: border-box; }
+html, body { height: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
-header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 5; }
-header h1 { font-size: 16px; margin: 0; font-weight: 650; }
-header .meta { color: var(--muted); font-size: 13px; }
+button, input, label.btn { font: inherit; color: var(--ink); }
+button, label.btn { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 5px 11px; cursor: pointer; }
+button:hover, label.btn:hover { border-color: var(--chips); }
+button.on { background: var(--chips); border-color: var(--chips); color: #fff; }
+.muted { color: var(--muted); } .small { font-size: 12px; } .mono { font-family: var(--mono); }
+.chips { color: var(--chips); font-weight: 700; } .mult { color: var(--mult); font-weight: 700; } .money { color: var(--money); font-weight: 700; }
+.up { color: var(--green); } .down { color: var(--red); }
+
+/* layout */
+header { height: 50px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 16px; margin: 0 8px 0 0; letter-spacing: .02em; }
 header .spacer { flex: 1; }
-button, select, label.btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 5px 10px; cursor: pointer; }
-button:hover, label.btn:hover { border-color: var(--accent); }
-button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
-.badge { display: inline-block; border-radius: 999px; padding: 1px 8px; font-size: 12px; font-weight: 600; border: 1px solid var(--line); background: var(--chip); }
-.badge.won { color: #fff; background: var(--ok); border-color: var(--ok); }
-.badge.lost { color: #fff; background: var(--err); border-color: var(--err); }
-.badge.llm { color: #fff; background: var(--llm); border-color: var(--llm); }
-.badge.policy { color: #fff; background: var(--policy); border-color: var(--policy); }
-.badge.auto { color: #fff; background: var(--auto); border-color: var(--auto); }
-.badge.assist { color: #fff; background: var(--assist); border-color: var(--assist); }
-#drop { display: grid; place-items: center; min-height: 70vh; padding: 16px; }
-#drop .box { max-width: 560px; text-align: center; border: 2px dashed var(--line); border-radius: 16px; padding: 32px; background: var(--panel); }
-#drop .box p { color: var(--muted); }
-#recordList { text-align: left; margin-top: 16px; max-height: 40vh; overflow: auto; }
-#recordList a { display: block; padding: 4px 0; color: var(--accent); text-decoration: none; font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
-main { display: none; padding: 12px 16px 40px; gap: 14px; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); }
-main.show { display: grid; }
-@media (max-width: 980px) { main.show { grid-template-columns: 1fr; } }
-.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; min-width: 0; }
-.panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 8px; font-weight: 650; }
-.panel h3 { font-size: 13px; margin: 12px 0 6px; color: var(--muted); font-weight: 600; }
-#timelineWrap { grid-column: 1 / -1; }
-#chart { width: 100%; height: 70px; display: block; cursor: pointer; }
-#ticks { display: flex; gap: 2px; align-items: flex-end; overflow-x: auto; padding: 6px 0 4px; }
-.ante { display: flex; flex-direction: column; gap: 3px; padding: 0 4px; border-left: 1px solid var(--line); }
-.ante:first-child { border-left: 0; }
-.ante .lbl { font-size: 11px; color: var(--muted); white-space: nowrap; }
-.ante .row { display: flex; gap: 1px; }
-.tick { width: 6px; height: 18px; border-radius: 2px; background: var(--auto); cursor: pointer; flex: none; opacity: .75; position: relative; }
-.tick.llm { background: var(--llm); } .tick.policy { background: var(--policy); } .tick.assist { background: var(--assist); }
-.tick.err { background: var(--err); } .tick.cur { outline: 2px solid var(--ink); opacity: 1; height: 22px; }
-.tick.hasnote::after { content: ""; position: absolute; top: -5px; left: 1px; width: 4px; height: 4px; border-radius: 50%; background: var(--assist); }
-#nav { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
-#nav .pos { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-left: 6px; }
-.kv { display: flex; flex-wrap: wrap; gap: 6px 14px; }
-.kv div { font-size: 13px; } .kv b { font-variant-numeric: tabular-nums; }
-.bar { height: 8px; background: var(--chip); border-radius: 4px; overflow: hidden; border: 1px solid var(--line); margin-top: 6px; }
-.bar > span { display: block; height: 100%; background: var(--accent); }
-.blinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
-.blind { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
-.blind.CURRENT, .blind.SELECT { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+#app { display: none; height: calc(100% - 50px); grid-template-columns: 300px minmax(0, 1fr) 380px; }
+#app.show { display: grid; }
+@media (max-width: 1180px) { #app.show { grid-template-columns: 270px minmax(0, 1fr); } #right { grid-column: 2; } }
+aside, main, #right { overflow-y: auto; min-width: 0; }
+aside { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }
+#right { border-left: 1px solid var(--line); background: var(--panel); padding: 14px; }
+main { padding: 16px 20px 40px; }
+
+/* sidebar */
+.runcard { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.runcard .title { font-weight: 700; font-size: 15px; }
+.runcard .row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+.pill { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 600; background: var(--panel2); border: 1px solid var(--line); }
+.pill.won { background: var(--green); border-color: var(--green); color: #0b1a12; }
+.pill.lost { background: var(--red); border-color: var(--red); color: #fff; }
+.pill.assist { color: var(--assist); border-color: var(--assist); }
+.viewtabs { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.viewtabs button { flex: 1; }
+#search { margin: 10px 14px 6px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); }
+#actions { flex: 1; overflow-y: auto; padding-bottom: 8px; }
+.sect { padding: 10px 14px 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 700; display: flex; gap: 6px; }
+.sect b { color: var(--ink); }
+.act { display: flex; align-items: center; gap: 8px; padding: 4px 14px 4px 10px; cursor: pointer; border-left: 4px solid transparent; font-size: 13px; }
+.act:hover { background: var(--panel2); }
+.act.cur { background: var(--raise); }
+.act .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.act .d { font-variant-numeric: tabular-nums; font-size: 12px; font-weight: 700; }
+.act .ic { font-size: 11px; color: var(--muted); }
+.act.k-play { border-left-color: var(--orange); } .act.k-discard { border-left-color: #c8a33a; }
+.act.k-blind { border-left-color: var(--red); } .act.k-skip { border-left-color: var(--llm); }
+.act.k-cash { border-left-color: var(--green); } .act.k-shop { border-left-color: var(--planet); }
+.act.k-buy { border-left-color: var(--money); } .act.k-sell { border-left-color: var(--green); }
+.act.k-use { border-left-color: var(--tarot); } .act.k-assist { border-left-color: var(--assist); }
+.act.k-other { border-left-color: var(--auto); } .act.err .txt { color: var(--red); }
+.act .note { width: 6px; height: 6px; border-radius: 50%; background: var(--money); flex: none; }
+.keys { padding: 8px 14px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--bg); }
+
+/* main board */
+.titlebar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.titlebar h2 { margin: 0; font-size: 19px; }
+.phase { font-size: 11px; font-weight: 700; letter-spacing: .06em; padding: 2px 8px; border-radius: 6px; background: var(--raise); color: var(--llm); border: 1px solid var(--line); }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 5px 11px; font-size: 13px; }
+.stat b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.progress { flex: 1 1 260px; }
+.bar { height: 7px; background: var(--bg); border-radius: 4px; margin-top: 4px; overflow: hidden; }
+.bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--chips), var(--mult)); }
+.section { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; }
+.section h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
+.section h3 .c { text-transform: none; letter-spacing: 0; }
+.row2 { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 1400px) { .row2 { grid-template-columns: 1fr; } }
+.blinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.blind { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--panel2); }
+.blind.CURRENT, .blind.SELECT { border-color: var(--chips); box-shadow: 0 0 0 1px var(--chips) inset; }
 .blind.DEFEATED, .blind.SKIPPED { opacity: .55; }
-.blind .nm { font-weight: 650; font-size: 13px; }
-.blind .ef { color: var(--muted); }
-.cards { display: flex; flex-wrap: wrap; gap: 6px; }
-.card { width: 54px; min-height: 74px; border: 1px solid var(--line); border-radius: 7px; background: var(--chip); display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; padding: 4px 2px; font-weight: 700; }
-.card .rk { font-size: 18px; line-height: 1; }
-.card .st { font-size: 18px; line-height: 1.1; }
-.card .ix { position: absolute; top: 2px; left: 4px; font-size: 10px; color: var(--muted); font-weight: 500; }
-.card .mods { font-size: 9px; font-weight: 600; text-align: center; color: var(--muted); line-height: 1.15; margin-top: 2px; }
-.card.H { color: var(--hearts); } .card.D { color: var(--diamonds); } .card.C { color: var(--clubs); } .card.S { color: var(--spades); }
-.card.hidden { color: var(--muted); background: repeating-linear-gradient(45deg, var(--chip), var(--chip) 5px, var(--line) 5px, var(--line) 10px); }
-.card.debuff { opacity: .45; text-decoration: line-through; }
-.card.sel { outline: 3px solid var(--accent); outline-offset: 1px; }
-.card.forced { box-shadow: 0 0 0 2px var(--assist); }
-.card.FOIL { box-shadow: inset 0 0 0 2px #8fb4d9; } .card.HOLO { box-shadow: inset 0 0 0 2px #d98fc6; }
-.card.POLYCHROME { box-shadow: inset 0 0 0 2px #e0b440; } .card.NEGATIVE { box-shadow: inset 0 0 0 2px #444; }
-.items { display: flex; flex-wrap: wrap; gap: 6px; }
-.item { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font-size: 12px; max-width: 220px; background: var(--chip); position: relative; }
-.item .nm { font-weight: 650; font-size: 13px; padding-right: 18px; }
-.item .ef { color: var(--muted); margin-top: 2px; }
-.item .ix { position: absolute; top: 4px; right: 6px; font-size: 10px; color: var(--muted); }
-.item.sel { outline: 3px solid var(--accent); }
-.item .tags { margin-top: 3px; display: flex; flex-wrap: wrap; gap: 3px; }
-.item .tags span { font-size: 10px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--panel); color: var(--ink); }
+.blind .nm { font-weight: 700; } .blind .sc { font-variant-numeric: tabular-nums; }
+.blind .st { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.blind .ef { font-size: 12px; color: var(--muted); margin-top: 3px; }
 .empty { color: var(--muted); font-size: 12px; font-style: italic; }
-table { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
-th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+
+/* cards */
+.cards { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.pc { width: 58px; height: 82px; border-radius: 7px; background: var(--face); color: var(--spades); position: relative; flex: none;
+  box-shadow: 0 2px 0 rgba(0,0,0,.35); display: flex; flex-direction: column; align-items: center; justify-content: center; font-weight: 800; transition: transform .1s; }
+.pc .r { position: absolute; top: 3px; left: 5px; font-size: 14px; line-height: 1; }
+.pc .s { font-size: 30px; line-height: 1; }
+.pc .ix { position: absolute; bottom: -16px; left: 0; right: 0; text-align: center; font-size: 10px; color: var(--muted); font-weight: 500; }
+.pc .tag { position: absolute; bottom: 3px; left: 3px; right: 3px; font-size: 8.5px; text-align: center; border-radius: 3px; padding: 0 2px; color: #fff; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; }
+.pc .seal { position: absolute; top: 4px; right: 4px; width: 9px; height: 9px; border-radius: 50%; border: 1px solid rgba(0,0,0,.3); }
+.pc.H { color: var(--hearts); } .pc.D { color: var(--diamonds); } .pc.C { color: var(--clubs); } .pc.S { color: var(--spades); }
+.pc.sel { transform: translateY(-10px); outline: 3px solid var(--chips); outline-offset: 1px; }
+.pc.dim { opacity: .45; }
+.pc.debuff { filter: grayscale(1); opacity: .5; }
+.pc.hidden { background: repeating-linear-gradient(45deg, #b8413c, #b8413c 6px, #a33833 6px, #a33833 12px); color: #fff; }
+.pc.forced { box-shadow: 0 0 0 3px var(--money); }
+.ed-FOIL { box-shadow: 0 0 0 3px #7fb6e8, 0 2px 0 rgba(0,0,0,.35); } .ed-HOLO { box-shadow: 0 0 0 3px #e07fd0, 0 2px 0 rgba(0,0,0,.35); }
+.ed-POLYCHROME { box-shadow: 0 0 0 3px #e0c050, 0 0 8px #9fe0ff, 0 2px 0 rgba(0,0,0,.35); } .ed-NEGATIVE { filter: invert(.85) hue-rotate(180deg); }
+.items { display: flex; flex-wrap: wrap; gap: 8px; }
+.it { width: 132px; min-height: 92px; border-radius: 9px; padding: 7px 8px 6px; background: var(--joker); position: relative; border: 1px solid rgba(255,255,255,.08); font-size: 12px; }
+.it .nm { font-weight: 700; font-size: 12.5px; padding-right: 16px; line-height: 1.2; }
+.it .ef { color: #d6cfe0; font-size: 11px; margin-top: 4px; line-height: 1.3; max-height: 58px; overflow: hidden; }
+.it .ix { position: absolute; top: 5px; right: 7px; font-size: 10px; color: rgba(255,255,255,.6); }
+.it .tags { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
+.it .tags span { font-size: 10px; border-radius: 4px; padding: 0 4px; background: rgba(0,0,0,.3); }
+.it .price { position: absolute; top: -9px; left: 8px; background: var(--money); color: #2a1d00; font-weight: 800; font-size: 11px; border-radius: 5px; padding: 0 5px; }
+.it.sel { outline: 3px solid var(--chips); outline-offset: 1px; }
+.it .mark { position: absolute; bottom: -9px; right: 8px; background: var(--chips); color: #fff; font-size: 10px; font-weight: 800; border-radius: 5px; padding: 0 6px; }
+.it.TAROT { background: var(--tarot); } .it.PLANET { background: var(--planet); } .it.SPECTRAL { background: var(--spectral); }
+.it.VOUCHER { background: var(--voucher); } .it.BOOSTER { background: var(--booster); }
+.it.debuff { filter: grayscale(.9); opacity: .6; }
+
+/* what happened */
+.happen { border-color: #4a5a66; }
+.happen .big { font-size: 18px; font-weight: 800; margin-bottom: 6px; }
+.formula { font-size: 22px; font-weight: 800; margin: 6px 0 10px; font-variant-numeric: tabular-nums; }
+.formula .x { color: var(--muted); margin: 0 6px; }
+.lvl { font-size: 11px; font-weight: 800; background: var(--money); color: #2a1d00; border-radius: 5px; padding: 1px 6px; margin-right: 6px; vertical-align: middle; }
+details > summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-weight: 600; }
-tr.best td { font-weight: 650; }
-.deckgrid td, .deckgrid th { text-align: center; padding: 2px 3px; }
+tr.best td { color: #fff; font-weight: 700; }
+.deckgrid td, .deckgrid th { text-align: center; padding: 2px 4px; }
 .deckgrid td.z { color: var(--line); }
-.action { font-size: 15px; font-weight: 650; margin: 4px 0 6px; }
-.delta { font-size: 13px; color: var(--muted); }
-.delta b.up { color: var(--ok); } .delta b.down { color: var(--err); }
-.reason { white-space: pre-wrap; font-size: 13px; background: var(--chip); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-height: 320px; overflow: auto; }
-details.tool { border: 1px solid var(--line); border-radius: 8px; margin: 6px 0; background: var(--panel); }
-details.tool > summary { cursor: pointer; padding: 6px 10px; font-weight: 600; font-size: 13px; }
+.foot { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: start; }
+.stack { width: 64px; height: 88px; border-radius: 8px; background: repeating-linear-gradient(45deg, #b8413c, #b8413c 6px, #a33833 6px, #a33833 12px);
+  position: relative; box-shadow: 3px 3px 0 #5a1d1a, 6px 6px 0 #3a1311; }
+.stack span { position: absolute; bottom: 4px; right: 6px; background: #000a; color: #fff; font-weight: 800; border-radius: 5px; padding: 0 5px; font-size: 12px; }
+
+/* right panel */
+#right h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 14px 0 6px; }
+#right h3:first-child { margin-top: 0; }
+.who { display: inline-block; font-size: 11px; font-weight: 800; border-radius: 6px; padding: 2px 8px; color: #fff; background: var(--auto); }
+.who.llm { background: var(--llm); } .who.policy { background: var(--policy); } .who.assist { background: var(--assist); }
+.reason { white-space: pre-wrap; font-size: 13px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-height: 360px; overflow: auto; }
+details.tool { border: 1px solid var(--line); border-radius: 9px; margin: 8px 0; background: var(--panel2); }
+details.tool > summary { padding: 7px 10px; font-weight: 700; color: var(--ink); font-size: 13px; margin: 0; }
 details.tool > div { padding: 0 10px 10px; overflow-x: auto; }
-pre.json { font-family: var(--mono); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; max-height: 300px; overflow: auto; }
-.err { color: var(--err); font-weight: 600; }
-textarea { width: 100%; min-height: 64px; font: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--chip); color: var(--ink); }
-.muted { color: var(--muted); } .small { font-size: 12px; }
-.help { font-size: 12px; color: var(--muted); }
-kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--chip); }
+pre.json { font-family: var(--mono); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; max-height: 280px; overflow: auto; }
+.err { color: var(--red); font-weight: 600; }
+textarea { width: 100%; min-height: 80px; font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; }
+
+/* summary */
+.banner { border-radius: 14px; padding: 18px 20px; margin-bottom: 14px; text-align: center; border: 1px solid var(--line); }
+.banner.won { background: linear-gradient(180deg, #1d4a35, var(--panel)); } .banner.lost { background: linear-gradient(180deg, #4a1f1d, var(--panel)); }
+.banner .big { font-size: 26px; font-weight: 800; }
+.facts { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 8px; font-size: 13px; color: var(--muted); }
+.facts b { color: var(--ink); }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+svg.chart { width: 100%; height: 150px; display: block; cursor: pointer; }
+
+/* landing */
+#drop { display: grid; place-items: center; min-height: calc(100% - 50px); padding: 16px; }
+#drop .box { max-width: 620px; text-align: center; border: 2px dashed var(--line); border-radius: 16px; padding: 32px; background: var(--panel); }
+#drop p { color: var(--muted); }
+#recordList { text-align: left; margin-top: 16px; max-height: 45vh; overflow: auto; }
+#recordList a { display: block; padding: 5px 0; color: var(--chips); text-decoration: none; font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
 <header>
   <h1>Balatro Game Viewer</h1>
-  <span class="meta" id="title"></span>
-  <span id="result"></span>
+  <span class="muted small" id="hdr"></span>
   <span class="spacer"></span>
-  <button id="themeBtn" title="Switch theme">◐</button>
   <label class="btn">Open record<input type="file" id="file" accept=".jsonl,.gz,.json" hidden></label>
 </header>
 
@@ -128,478 +181,488 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
   <div class="box">
     <h2 style="margin-top:0">Open a game record</h2>
     <p>Drop a <code>record.jsonl</code> here or use <b>Open record</b>. Records are written by the LLM runner
-      (<code>runtime/llm_runs/…/record.jsonl</code>) and by <code>scripts/record_game.py</code>
-      (<code>runtime/records/</code>). <code>scripts/view_record.py</code> serves this page with a list of your records.</p>
+      (<code>runtime/llm_runs/…/record.jsonl</code>) and by <code>scripts/record_game.py</code> (<code>runtime/records/</code>).
+      <code>scripts/view_record.py</code> serves this page with a list of your records.</p>
     <div id="recordList"></div>
   </div>
 </div>
 
-<main id="app">
-  <section class="panel" id="timelineWrap">
-    <svg id="chart" preserveAspectRatio="none" aria-label="Money over the game"></svg>
-    <div id="ticks"></div>
-    <div id="nav">
-      <button data-go="first" title="First step (Home)">⏮</button>
-      <button data-go="prevDecision" title="Previous decision (Shift+←)">⇤</button>
-      <button data-go="prev" title="Previous step (←)">◀</button>
-      <button data-go="next" title="Next step (→)">▶</button>
-      <button data-go="nextDecision" title="Next decision (Shift+→)">⇥</button>
-      <button data-go="last" title="Last step (End)">⏭</button>
-      <button id="decOnly" title="Only stop on decisions (D)">Decisions only</button>
-      <span class="pos" id="pos"></span>
-      <span class="spacer"></span>
-      <span class="help"><kbd>←</kbd><kbd>→</kbd> step · <kbd>Shift</kbd> decision · <kbd>[</kbd><kbd>]</kbd> blind · <kbd>N</kbd> note</span>
-    </div>
-  </section>
-
-  <section class="panel" id="board"></section>
-
-  <section class="panel" id="side">
-    <div id="decision"></div>
-    <h3>Your notes on this step</h3>
-    <textarea id="note" placeholder="Notes are saved in this browser for this record."></textarea>
-    <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap">
-      <button id="exportNotes">Export notes</button>
-      <label class="btn">Import notes<input type="file" id="importNotes" accept=".json" hidden></label>
-    </div>
-  </section>
-</main>
+<div id="app">
+  <aside>
+    <div class="runcard" id="runcard"></div>
+    <div class="viewtabs"><button id="tabGame" class="on">Game</button><button id="tabSummary">Summary</button></div>
+    <input id="search" placeholder="Search actions (e.g. buy, flush, Blueprint)">
+    <div id="actions"></div>
+    <div class="keys"><kbd>↑</kbd><kbd>↓</kbd> step · <kbd>Shift</kbd> decisions · <kbd>[</kbd><kbd>]</kbd> sections · <kbd>N</kbd> note · <kbd>S</kbd> summary</div>
+  </aside>
+  <main id="main"></main>
+  <div id="right"></div>
+</div>
 
 <script>
 "use strict";
 const $ = (s) => document.querySelector(s);
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const arr = (x) => (Array.isArray(x) ? x : x == null ? [] : [x]);
+const obj = (x) => (x && typeof x === "object" && !Array.isArray(x) ? x : {});
+const num = (n) => (typeof n === "number" && isFinite(n) ? n : null);
+const fmt = (n) => { const v = num(n); if (v == null) return n == null ? "–" : esc(n);
+  return Math.abs(v) >= 1e9 ? v.toExponential(2) : (Math.round(v * 100) / 100).toLocaleString(); };
+const pct = (p) => (num(p) == null ? "–" : (100 * p).toFixed(p >= 0.995 || p < 0.005 ? 0 : 1) + "%");
 const SUIT = { H: "♥", D: "♦", C: "♣", S: "♠" };
 const RANK = { T: "10" };
-const fmt = (n) => (n == null ? "–" : typeof n === "number" ? (Math.abs(n) >= 1e6 ? n.toExponential(2) : Math.round(n * 100) / 100).toLocaleString() : esc(n));
-const arr = (x) => (Array.isArray(x) ? x : x == null ? [] : [x]);   // model-sent fields may be malformed
-const pct = (p) => (p == null ? "–" : (100 * p).toFixed(p >= 0.995 || p < 0.005 ? 0 : 1) + "%");
+const SEALC = { RED: "#e0413a", BLUE: "#2f9bf0", GOLD: "#f4b63a", PURPLE: "#a77cf0" };
+const ENHC = { BONUS: "#2f9bf0", MULT: "#e0413a", WILD: "#8f5fd0", GLASS: "#7fb6e8", STEEL: "#7a8a96", STONE: "#8a7a66", GOLD: "#d9a320", LUCKY: "#3fa66a" };
+const nice = (k) => String(k || "?").replace(/^[jcvp]_/, "").replace(/_\d+$/, "").replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 
-let REC = null;      // {header, steps, notes, end}
-let cur = 0;
-let decisionsOnly = false;
-let userNotes = {};
+let R = null, cur = 0, view = "game", notes = {};
 
-// ---------- theme ----------
-(function () {
-  let t = null;
-  try { t = localStorage.getItem("bv-theme"); } catch (e) {}
-  if (t) document.documentElement.dataset.theme = t;
-  $("#themeBtn").onclick = () => {
-    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-    const now = document.documentElement.dataset.theme || (dark ? "dark" : "light");
-    const next = now === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem("bv-theme", next); } catch (e) {}
-  };
-})();
-
-// ---------- loading ----------
+// ------------------------------------------------------------------ loading
 async function readFile(file) {
-  if (file.name.endsWith(".gz")) {
-    const ds = new DecompressionStream("gzip");
-    return await new Response(file.stream().pipeThrough(ds)).text();
-  }
+  if (file.name.endsWith(".gz")) return await new Response(file.stream().pipeThrough(new DecompressionStream("gzip"))).text();
   return await file.text();
 }
 function parse(text) {
-  const rec = { header: {}, steps: [], notes: [], end: null };
+  const rec = { header: {}, steps: [], notes: [], end: null, start: null };
   for (const line of text.split("\n")) {
     if (!line.trim()) continue;
-    let o;
-    try { o = JSON.parse(line); } catch (e) { continue; }   // a line still being written
-    if (o.type === "header") rec.header = o;
-    else if (o.type === "step") rec.steps.push(o);
-    else if (o.type === "note") rec.notes.push(o);
-    else if (o.type === "state") rec.start = o.state;
-    else if (o.type === "end") rec.end = o;
+    let o; try { o = JSON.parse(line); } catch (e) { continue; }   // a line still being written
+    if (o.type === "header") rec.header = o; else if (o.type === "step") rec.steps.push(o);
+    else if (o.type === "note") rec.notes.push(o); else if (o.type === "state") rec.start = o.state; else if (o.type === "end") rec.end = o;
   }
-  // the state each step acted on: the previous step's result
-  let prev = rec.start || null;
-  for (const s of rec.steps) {
-    s.before = prev;
-    if (s.result) prev = s.result;
-  }
-  rec.notesByStep = {};
-  for (const n of rec.notes) (rec.notesByStep[n.after_step] ||= []).push(n);
-  rec.id = `${rec.header.seed || "?"}|${rec.header.started || ""}|${(rec.header.player || {}).label || ""}`;
+  let prev = rec.start;
+  for (const s of rec.steps) { s.before = prev || s.result || {}; if (s.result) prev = s.result; }
+  rec.notesBy = {};
+  for (const n of rec.notes) (rec.notesBy[n.after_step] ||= []).push(n);
+  rec.id = `${rec.header.seed}|${rec.header.started}|${obj(rec.header.player).label}`;
+  rec.assisted = rec.steps.some((s) => s.actor === "assist") || !!(obj(rec.header.player).assist_money || obj(rec.header.player).assist_chips);
+  annotate(rec);
   return rec;
 }
-function show(rec) {
-  REC = rec;
-  try { userNotes = JSON.parse(localStorage.getItem("bv-notes:" + rec.id) || "{}"); } catch (e) { userNotes = {}; }
-  $("#drop").style.display = "none";
-  $("#app").classList.add("show");
-  const h = rec.header, p = h.player || {};
-  $("#title").textContent = `${h.seed || "?"} · ${h.deck || "?"} / ${h.stake || "?"} · ${p.kind === "llm" ? (p.model || "LLM") + (p.tools ? " + tools" : "") : (p.label || "policy")}` +
-    (p.assist_money || p.assist_chips ? " · assisted" : "") + (h.backend ? ` · ${h.backend}` : "");
-  const e = rec.end;
-  $("#result").innerHTML = e ? (e.won ? `<span class="badge won">Won · cleared ante 8</span>` : `<span class="badge lost">Lost · ante ${e.ante ?? "?"}</span>`) +
-      (e.error ? ` <span class="badge" title="${esc(e.error)}">${esc(e.error_kind || "error")}</span>` : "") +
-      (e.cost_usd ? ` <span class="badge">$${e.cost_usd.toFixed(3)}</span>` : "") + ` <span class="badge">${fmt(e.seconds)} s</span>`
-    : `<span class="badge">in progress</span>`;
-  cur = Math.min(firstPlayable(), rec.steps.length - 1);
-  drawTimeline();
-  render();
+const area = (st, k) => arr(obj(obj(st)[k]).cards);
+function currentBlind(st) {
+  const bl = Object.values(obj(obj(st).blinds));
+  return bl.find((b) => b.status === "CURRENT") || bl.find((b) => b.status === "SELECT") || null;
 }
-function firstPlayable() {
-  const i = REC.steps.findIndex((s) => s.method !== "menu" && s.method !== "start");
-  return i < 0 ? 0 : i;
+const itemName = (c) => (c ? (obj(c.state).hidden ? "a face-down card" : c.label && c.label !== "Base Card" ? c.label : cardText(c)) : "?");
+function cardText(c) {
+  const v = obj(c.value);
+  if (obj(c.modifier).enhancement === "STONE") return "Stone card";
+  return v.rank ? `${RANK[v.rank] || v.rank}${SUIT[v.suit] || ""}` : nice(c.key);
+}
+// what each step did, in words, with its section of the run
+function annotate(rec) {
+  let section = null, lastBlind = "the start", shopNo = 0;
+  rec.sections = [];
+  const open = (title, kind) => { section = { title, kind, idx: [] }; rec.sections.push(section); };
+  for (const [i, s] of rec.steps.entries()) {
+    const b = s.before, p = obj(s.params), r = s.result || {};
+    const money = num(r.money) != null && num(b.money) != null ? r.money - b.money : 0;
+    let text = s.method, kind = "other", delta = "";
+    const st = b.state || "";
+    if (s.method === "select" || s.method === "skip") {
+      const bl = currentBlind(b) || {};
+      lastBlind = bl.name || "a blind";
+      if (s.method === "select") { open(`Ante ${b.ante_num} · ${lastBlind}`, "blind"); text = `Played ${lastBlind}`; kind = "blind"; }
+      else { if (!section || section.kind !== "skips") open(`Ante ${b.ante_num} · skipped blinds`, "skips"); text = `Skipped ${lastBlind}` + (bl.tag_name ? ` for ${bl.tag_name}` : ""); kind = "skip"; }
+    } else if ((st === "SHOP" || st === "SMODS_BOOSTER_OPENED") && (!section || section.kind !== "shop")) {
+      shopNo += 1; open(`Ante ${b.ante_num} · Shop after ${lastBlind}`, "shop"); section.shopNo = shopNo;
+    } else if (!section) open("Start", "start");
+    switch (s.method) {
+      case "start": text = `Started ${p.deck || ""} / ${p.stake || ""}`; break;
+      case "menu": text = "Menu"; break;
+      case "play": { const sc = s.scoring; text = `Played ${sc ? sc.hand : arr(p.cards).length + " cards"}`; kind = "play";
+        if (sc && num(sc.total) != null) delta = `<span class="up">+${fmt(sc.total)}</span>`; break; }
+      case "discard": text = `Discarded ${arr(p.cards).length} card${arr(p.cards).length === 1 ? "" : "s"}`; kind = "discard"; break;
+      case "cash_out": text = "Cashed out"; kind = "cash"; break;
+      case "buy": kind = "buy";
+        text = p.card != null ? `Bought ${itemName(area(b, "shop")[p.card])}` : p.voucher != null ? `Redeemed ${itemName(area(b, "vouchers")[p.voucher])}` : `Opened ${itemName(area(b, "packs")[p.pack])}`; break;
+      case "sell": kind = "sell"; text = `Sold ${itemName(p.joker != null ? area(b, "jokers")[p.joker] : area(b, "consumables")[p.consumable])}`; break;
+      case "use": kind = "use"; text = `Used ${itemName(area(b, "consumables")[p.consumable])}`; break;
+      case "pack": kind = p.skip ? "other" : "use"; text = p.skip ? "Skipped the pack" : `Took ${itemName(area(b, "pack")[p.card])}`; break;
+      case "reroll": kind = "buy"; text = "Rerolled the shop"; break;
+      case "next_round": kind = "shop"; text = "Left the shop"; break;
+      case "rearrange": text = `Rearranged ${Object.keys(p).join(", ")}`; break;
+      case "set": kind = "assist"; text = `Assist: ${Object.entries(p).map(([k, v]) => `${k} → ${v}`).join(", ")}`; break;
+    }
+    if (s.actor === "assist") kind = "assist";
+    if (!delta && money) delta = `<span class="${money > 0 ? "up" : "down"}">${money > 0 ? "+" : "−"}$${Math.abs(money)}</span>`;
+    if (s.error) { text = `Refused: ${text}`; }
+    Object.assign(s, { text, kind, delta, money, section });
+    section.idx.push(i);
+  }
+}
+function show(rec) {
+  R = rec;
+  try { notes = JSON.parse(localStorage.getItem("bvn:" + R.id) || "{}"); } catch (e) { notes = {}; }
+  $("#drop").style.display = "none"; $("#app").classList.add("show");
+  const h = R.header, p = obj(h.player), e = R.end;
+  const who = p.kind === "llm" ? `${p.model || "LLM"}${p.tools ? " · with tools" : ""}` : `${p.label || "policy"} bot`;
+  $("#hdr").textContent = `${h.seed || "?"} · ${who}`;
+  const result = !e ? `<span class="pill">in progress</span>` : e.won ? `<span class="pill won">Won</span>` :
+    `<span class="pill lost">Lost at ante ${esc(e.ante ?? "?")}</span>`;
+  $("#runcard").innerHTML = `<div class="title">${esc(nice(h.deck))} Deck · ${esc(nice(h.stake))} Stake</div>
+    <div class="row">${result}${R.assisted ? '<span class="pill assist">assisted</span>' : ""}<span class="pill mono">${esc(h.seed || "?")}</span></div>
+    <div class="row small muted">${esc(who)}${h.backend ? " · " + esc(h.backend) : ""}${e ? ` · ${fmt(e.seconds)} s` : ""}${e && e.cost_usd ? ` · $${e.cost_usd.toFixed(3)}` : ""}</div>`;
+  const m = /#s=(\d+)/.exec(location.hash);
+  cur = m ? Math.min(+m[1], R.steps.length - 1) : Math.max(0, R.steps.findIndex((s) => s.method !== "start" && s.method !== "menu"));
+  drawActions(); setView(location.hash.includes("summary") ? "summary" : "game");
 }
 $("#file").onchange = async (ev) => { const f = ev.target.files[0]; if (f) show(parse(await readFile(f))); };
 document.addEventListener("dragover", (e) => e.preventDefault());
 document.addEventListener("drop", async (e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) show(parse(await readFile(f))); });
-(async function boot() {
+(async () => {
   const q = new URLSearchParams(location.search);
-  if (q.get("record")) {
-    const r = await fetch(q.get("record"));
-    if (r.ok) return show(parse(await r.text()));
-  }
-  try {   // list of records written by scripts/view_record.py
+  if (q.get("record")) { const r = await fetch(q.get("record")); if (r.ok) return show(parse(await r.text())); }
+  try {
     const r = await fetch("records.json");
-    if (r.ok) {
-      const list = await r.json();
-      $("#recordList").innerHTML = list.length ? "<b>Your records</b>" + list.map((x) =>
-        `<a href="?record=${encodeURIComponent(x.url)}">${esc(x.name)}</a>`).join("") : "";
-    }
+    if (r.ok) { const list = await r.json();
+      $("#recordList").innerHTML = list.length ? "<b>Your records</b> (newest first)" + list.map((x) =>
+        `<a href="?record=${encodeURIComponent(x.url)}">${esc(x.name)}</a>`).join("") : ""; }
   } catch (e) {}
 })();
 
-// ---------- timeline ----------
-const isDecision = (s) => s.actor === "llm" || s.actor === "policy";
-function blindKey(st) {
-  if (!st) return "";
-  const b = Object.values(st.blinds || {}).find((x) => x.status === "CURRENT");
-  return `${st.ante_num}:${b ? b.type : st.state}`;
-}
-function drawTimeline() {
-  const steps = REC.steps;
-  const groups = [];
-  for (const [i, s] of steps.entries()) {
-    const st = s.result || s.before || {};
-    const a = st.ante_num ?? "?";
-    if (!groups.length || groups[groups.length - 1].ante !== a) groups.push({ ante: a, idx: [] });
-    groups[groups.length - 1].idx.push(i);
+// ------------------------------------------------------------------ sidebar
+function drawActions() {
+  const q = $("#search").value.trim().toLowerCase();
+  let html = "";
+  for (const sec of R.sections) {
+    const rows = sec.idx.filter((i) => !q || (R.steps[i].text + " " + sec.title).toLowerCase().includes(q));
+    if (!rows.length) continue;
+    const [a, b] = sec.title.split(" · ");
+    html += `<div class="sect">${esc(a)}${b ? ` · <b>${esc(b)}</b>` : ""}</div>`;
+    for (const i of rows) {
+      const s = R.steps[i], d = s.decision;
+      const tools = d && arr(d.tool_calls).length ? `<span class="ic">${arr(d.tool_calls).length}🔧</span>` : "";
+      const warn = R.notesBy[i] ? `<span class="ic" title="invalid model answer after this step">⚠</span>` : "";
+      html += `<div class="act k-${s.kind}${s.error ? " err" : ""}${i === cur ? " cur" : ""}" data-i="${i}">` +
+        `<span class="txt" title="${esc(s.text)}">${esc(s.text)}</span>${notes[i] ? '<span class="note"></span>' : ""}${tools}${warn}<span class="d">${s.delta}</span></div>`;
+    }
   }
-  $("#ticks").innerHTML = groups.map((g) => `<div class="ante"><div class="lbl">Ante ${g.ante}</div><div class="row">` +
-    g.idx.map((i) => {
-      const s = steps[i];
-      const cls = ["tick", s.actor, s.error ? "err" : "", (userNotes[i] || REC.notesByStep[i]) ? "hasnote" : ""].join(" ");
-      return `<div class="${esc(cls)}" data-i="${i}" title="${i}: ${esc(s.actor)} ${esc(s.method)}"></div>`;
-    }).join("") + "</div></div>").join("");
-  $("#ticks").onclick = (e) => { const t = e.target.closest(".tick"); if (t) { cur = +t.dataset.i; render(); } };
-  drawChart();
+  $("#actions").innerHTML = html || `<div class="sect">no match</div>`;
 }
-function drawChart() {
-  const svg = $("#chart"), steps = REC.steps, n = Math.max(1, steps.length - 1);
-  const W = 1000, H = 70;
-  const money = steps.map((s) => (s.result || s.before || {}).money ?? 0);
-  const maxM = Math.max(10, ...money);
-  const prog = steps.map((s) => {
-    const st = s.result || s.before || {};
-    const b = Object.values(st.blinds || {}).find((x) => x.status === "CURRENT");
-    return b && b.score ? Math.min(1, ((st.round || {}).chips || 0) / b.score) : null;
-  });
-  const x = (i) => (i / n) * W;
-  const mPath = money.map((m, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${(H - 4 - (m / maxM) * (H - 10)).toFixed(1)}`).join("");
-  let pPath = "";
-  prog.forEach((p, i) => { if (p != null) pPath += `M${x(i).toFixed(1)},${H}L${x(i).toFixed(1)},${(H - p * (H - 6)).toFixed(1)}`; });
-  let antes = "";
-  steps.forEach((s, i) => {
-    if (i && (s.result || {}).ante_num !== (steps[i - 1].result || {}).ante_num && (s.result || {}).ante_num)
-      antes += `<line x1="${x(i)}" x2="${x(i)}" y1="0" y2="${H}" stroke="var(--line)" stroke-width="2"/>`;
-  });
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  svg.innerHTML = `${antes}<path d="${pPath}" stroke="var(--accent)" stroke-opacity=".25" stroke-width="3"/>` +
-    `<path d="${mPath}" fill="none" stroke="var(--ok)" stroke-width="2" vector-effect="non-scaling-stroke"/>` +
-    `<line id="curLine" x1="${x(cur)}" x2="${x(cur)}" y1="0" y2="${H}" stroke="var(--ink)" stroke-width="2" vector-effect="non-scaling-stroke"/>` +
-    `<text x="4" y="12" font-size="11" fill="var(--muted)">money (green, max $${maxM}) · score toward blind (blue)</text>`;
-  svg.onclick = (e) => {
-    const r = svg.getBoundingClientRect();
-    cur = Math.round(((e.clientX - r.left) / r.width) * n);
-    render();
-  };
+$("#actions").onclick = (e) => { const r = e.target.closest(".act"); if (r) { cur = +r.dataset.i; setView("game"); } };
+$("#search").oninput = drawActions;
+$("#tabGame").onclick = () => setView("game");
+$("#tabSummary").onclick = () => setView("summary");
+function setView(v) {
+  view = v; $("#tabGame").classList.toggle("on", v === "game"); $("#tabSummary").classList.toggle("on", v === "summary");
+  if (v === "summary") { history.replaceState(null, "", location.search + "#summary"); renderSummary(); }
+  else render();
 }
 
-// ---------- navigation ----------
-function go(where) {
-  const steps = REC.steps, N = steps.length;
-  const ok = (i) => !decisionsOnly || isDecision(steps[i]);
-  const find = (from, dir, pred) => { for (let i = from; i >= 0 && i < N; i += dir) if (pred(i)) return i; return null; };
-  let t = null;
-  if (where === "first") t = find(0, 1, ok);
-  else if (where === "last") t = find(N - 1, -1, ok);
-  else if (where === "next") t = find(cur + 1, 1, ok);
-  else if (where === "prev") t = find(cur - 1, -1, ok);
-  else if (where === "nextDecision") t = find(cur + 1, 1, (i) => isDecision(steps[i]));
-  else if (where === "prevDecision") t = find(cur - 1, -1, (i) => isDecision(steps[i]));
-  else if (where === "nextBlind" || where === "prevBlind") {
-    const dir = where === "nextBlind" ? 1 : -1, k = blindKey(steps[cur].before);
-    t = find(cur + dir, dir, (i) => blindKey(steps[i].before) !== k && ok(i));
-    if (t != null && dir < 0) { const k2 = blindKey(steps[t].before); while (t > 0 && blindKey(steps[t - 1].before) === k2) t--; }
-  }
-  if (t != null) { cur = t; render(); }
+// ------------------------------------------------------------------ cards and items
+function pcHTML(c, i, o = {}) {
+  const v = obj(c.value), m = obj(c.modifier), st = obj(c.state);
+  const hidden = st.hidden && !o.reveal, stone = m.enhancement === "STONE";
+  const cls = ["pc", hidden ? "hidden" : v.suit || "", o.sel ? "sel" : "", o.dim ? "dim" : "", st.debuff ? "debuff" : "",
+    m.edition ? "ed-" + m.edition : "", st.highlight && o.inHand ? "forced" : ""].join(" ");
+  const tip = [itemName(c), m.enhancement && m.enhancement.toLowerCase(), m.edition && m.edition.toLowerCase(), m.seal && m.seal.toLowerCase() + " seal",
+    st.debuff && "debuffed", hidden && "face down", st.highlight && o.inHand && "forced (Cerulean Bell)", v.effect].filter(Boolean).join(" · ");
+  const face = hidden ? `<span class="s">?</span>` : stone ? `<span class="s" style="color:#6b5e4e">▦</span>` :
+    `<span class="r">${esc(RANK[v.rank] || v.rank || "")}</span><span class="s">${SUIT[v.suit] || ""}</span>`;
+  const tag = !hidden && m.enhancement && !stone ? `<span class="tag" style="background:${ENHC[m.enhancement] || "#666"}">${esc(m.enhancement.toLowerCase())}</span>` : "";
+  const seal = !hidden && m.seal ? `<span class="seal" style="background:${SEALC[m.seal] || "#999"}"></span>` : "";
+  return `<div class="${esc(cls)}" title="${esc(tip)}">${face}${tag}${seal}${i != null ? `<span class="ix">${i}</span>` : ""}</div>`;
 }
-$("#nav").onclick = (e) => { const b = e.target.closest("[data-go]"); if (b) go(b.dataset.go); };
-$("#decOnly").onclick = () => { decisionsOnly = !decisionsOnly; $("#decOnly").classList.toggle("on", decisionsOnly); };
-document.addEventListener("keydown", (e) => {
-  if (!REC || e.target.tagName === "TEXTAREA") return;
-  const k = e.key;
-  if (k === "ArrowRight") go(e.shiftKey ? "nextDecision" : "next");
-  else if (k === "ArrowLeft") go(e.shiftKey ? "prevDecision" : "prev");
-  else if (k === "]") go("nextBlind");
-  else if (k === "[") go("prevBlind");
-  else if (k === "Home") go("first");
-  else if (k === "End") go("last");
-  else if (k === "d" || k === "D") $("#decOnly").click();
-  else if (k === "n" || k === "N") { e.preventDefault(); $("#note").focus(); }
-  else return;
-  e.preventDefault();
-});
-
-// ---------- rendering the game ----------
-function cardHTML(c, i, opts = {}) {
-  const v = c.value || {}, m = Array.isArray(c.modifier) ? {} : (c.modifier || {}), st = Array.isArray(c.state) ? {} : (c.state || {});
-  const cls = ["card", v.suit || "", st.hidden && !opts.reveal ? "hidden" : "", st.debuff ? "debuff" : "", m.edition || "",
-    opts.sel ? "sel" : "", st.highlight && opts.inHand ? "forced" : ""].join(" ");
-  const mods = [m.enhancement && m.enhancement.toLowerCase(), m.seal && m.seal.toLowerCase() + " seal", m.edition && m.edition.toLowerCase()].filter(Boolean);
-  const stone = m.enhancement === "STONE";
-  const face = st.hidden && !opts.reveal ? `<span class="rk">?</span><span class="mods">face down</span>`
-    : stone ? `<span class="rk">▦</span><span class="mods">stone</span>`
-    : `<span class="rk">${esc(RANK[v.rank] || v.rank || "?")}</span><span class="st">${SUIT[v.suit] || ""}</span>` + (mods.length ? `<span class="mods">${esc(mods.join(" · "))}</span>` : "");
-  const tip = [c.label, v.effect, st.debuff && "debuffed", st.hidden && "face down", st.highlight && opts.inHand && "forced selection"].filter(Boolean).join(" — ");
-  return `<div class="${esc(cls)}" title="${esc(tip)}">${i != null ? `<span class="ix">${i}</span>` : ""}${face}</div>`;
-}
-function itemHTML(c, i, opts = {}) {
-  const v = c.value || {}, m = Array.isArray(c.modifier) ? {} : (c.modifier || {}), st = Array.isArray(c.state) ? {} : (c.state || {});
+function itHTML(c, i, o = {}) {
+  if (obj(c.value).rank || ["DEFAULT", "ENHANCED"].includes(c.set)) return `<div style="position:relative">${pcHTML(c, i, o)}${o.cost && c.cost ? `<div class="small money" style="text-align:center;margin-top:16px">$${esc(c.cost.buy)}</div>` : ""}</div>`;
+  const v = obj(c.value), m = obj(c.modifier), st = obj(c.state);
   const tags = [];
   if (m.edition) tags.push(m.edition.toLowerCase());
-  if (m.eternal) tags.push("eternal");
-  if (m.perishable) tags.push(`perishable ${m.perishable}`);
-  if (m.rental) tags.push("rental");
+  if (m.eternal) tags.push("eternal"); if (m.perishable) tags.push(`perishable ${m.perishable}`); if (m.rental) tags.push("rental");
   if (st.debuff) tags.push("debuffed");
-  if (opts.cost && c.cost) tags.push(`$${c.cost.buy}`);
-  if (opts.sell && c.cost) tags.push(`sells $${c.cost.sell}`);
-  const name = st.hidden ? "face down" : (c.label || c.key);
-  return `<div class="item${opts.sel ? " sel" : ""}" title="${esc(c.key)}"><span class="ix">${i}</span><div class="nm">${esc(name)}</div>` +
+  if (o.sell && c.cost) tags.push(`sell $${c.cost.sell}`);
+  const cls = ["it", c.set || "", o.sel ? "sel" : "", st.debuff ? "debuff" : "", m.edition ? "ed-" + m.edition : ""].join(" ");
+  return `<div class="${esc(cls)}" title="${esc(c.key)}">${o.cost && c.cost ? `<span class="price">$${esc(c.cost.buy)}</span>` : ""}` +
+    `<span class="ix">${i}</span><div class="nm">${esc(st.hidden ? "face down" : c.label || nice(c.key))}</div>` +
     (v.effect && !st.hidden ? `<div class="ef">${esc(v.effect)}</div>` : "") +
-    (tags.length ? `<div class="tags">${tags.map((t) => `<span>${esc(t)}</span>`).join("")}</div>` : "") + "</div>";
+    (tags.length ? `<div class="tags">${tags.map((t) => `<span>${esc(t)}</span>`).join("")}</div>` : "") +
+    (o.mark ? `<span class="mark">${esc(o.mark)}</span>` : "") + "</div>";
 }
-const area = (st, k) => ((st || {})[k] || {}).cards || [];
-function selected(step, which) {
-  const p = step.params || {}, out = new Set();
-  const add = (x) => (Array.isArray(x) ? x : x == null ? [] : [x]).forEach((i) => out.add(i));
-  if (which === "hand" && ["play", "discard"].includes(step.method)) add(p.cards);
-  if (which === "hand" && ["use", "pack"].includes(step.method)) add(p.cards || p.targets);
-  if (which === "shop" && step.method === "buy") add(p.card);
-  if (which === "vouchers" && step.method === "buy") add(p.voucher);
-  if (which === "packs" && step.method === "buy") add(p.pack);
-  if (which === "jokers" && step.method === "sell") add(p.joker);
-  if (which === "consumables" && ["sell", "use"].includes(step.method)) add(p.consumable);
-  if (which === "pack" && step.method === "pack") add(p.card);
+function selectedIn(s, which) {
+  const p = obj(s.params), out = new Set(), add = (x) => arr(x).forEach((i) => out.add(i));
+  if (which === "hand" && ["play", "discard"].includes(s.method)) add(p.cards);
+  if (which === "hand" && ["use", "pack"].includes(s.method)) add(p.cards || p.targets);
+  if (which === "shop" && s.method === "buy") add(p.card);
+  if (which === "vouchers" && s.method === "buy") add(p.voucher);
+  if (which === "packs" && s.method === "buy") add(p.pack);
+  if (which === "jokers" && s.method === "sell") add(p.joker);
+  if (which === "consumables" && ["sell", "use"].includes(s.method)) add(p.consumable);
+  if (which === "pack" && s.method === "pack") add(p.card);
   return out;
+}
+
+// ------------------------------------------------------------------ game view
+function render() {
+  if (!R || !R.steps.length) return;
+  cur = Math.max(0, Math.min(cur, R.steps.length - 1));
+  const s = R.steps[cur], b = s.before, rnd = obj(b.round), blind = currentBlind(b);
+  history.replaceState(null, "", location.search + "#s=" + cur);
+  document.querySelectorAll(".act.cur").forEach((x) => x.classList.remove("cur"));
+  const row = document.querySelector(`.act[data-i="${cur}"]`);
+  if (row) { row.classList.add("cur"); row.scrollIntoView({ block: "nearest" }); }
+  const target = blind && b.state !== "BLIND_SELECT" ? blind.score : null;
+  const moneyChip = s.money ? `$${fmt(b.money)} → <span class="${s.money > 0 ? "up" : "down"}">$${fmt(obj(s.result).money)}</span>` : `$${fmt(b.money)}`;
+  const sel = (w) => selectedIn(s, w);
+  let html = `<div class="titlebar"><h2>${esc(s.section.title)}</h2><span class="phase">${esc(String(b.state || "").replace(/_/g, " "))}</span>
+      <span class="muted small">step ${cur + 1} of ${R.steps.length}</span></div>
+    <div class="stats"><div class="stat money">${moneyChip}</div><div class="stat"><b>${fmt(rnd.hands_left)}</b> hands</div>
+      <div class="stat"><b>${fmt(rnd.discards_left)}</b> discards</div><div class="stat">Ante <b>${fmt(b.ante_num)}</b> · Round <b>${fmt(b.round_num)}</b></div>
+      ${target ? `<div class="stat progress">${esc(blind.name)}: <b>${fmt(rnd.chips || 0)}</b> / ${fmt(target)}<div class="bar"><span style="width:${Math.min(100, (100 * (rnd.chips || 0)) / target)}%"></span></div></div>` : ""}</div>`;
+  html += happenedHTML(s);
+  const blinds = ["small", "big", "boss"].map((k) => obj(b.blinds)[k]).filter((x) => x && x.name);
+  if (blinds.length) html += `<div class="section"><h3>Blinds</h3><div class="blinds">${blinds.map((x) => `<div class="blind ${esc(x.status)}">
+      <div class="nm">${esc(x.name)}</div><div class="sc">${fmt(x.score)} chips</div><div class="st">${esc(x.status)}</div>
+      ${x.effect ? `<div class="ef">${esc(x.effect)}</div>` : ""}${x.tag_name ? `<div class="ef">Skip for: <b>${esc(x.tag_name)}</b>${x.tag_effect ? " — " + esc(x.tag_effect) : ""}</div>` : ""}</div>`).join("")}</div></div>`;
+  const list = (k, f) => { const cs = area(b, k); return cs.length ? cs.map(f).join("") : `<div class="empty">none</div>`; };
+  html += `<div class="row2"><div class="section"><h3>Jokers <span class="c">${area(b, "jokers").length}/${fmt(obj(b.jokers).limit)}</span></h3><div class="items">${list("jokers", (c, i) => itHTML(c, i, { sell: true, sel: sel("jokers").has(i) }))}</div></div>
+    <div class="section"><h3>Consumables <span class="c">${area(b, "consumables").length}/${fmt(obj(b.consumables).limit)}</span></h3><div class="items">${list("consumables", (c, i) => itHTML(c, i, { sel: sel("consumables").has(i) }))}</div></div></div>`;
+  if (area(b, "pack").length) {
+    html += `<div class="section"><h3>Open pack</h3><div class="items" style="padding-top:10px">${area(b, "pack").map((c, i) => itHTML(c, i, { sel: sel("pack").has(i), reveal: true, mark: sel("pack").has(i) ? "TAKEN" : "" })).join("")}</div></div>`;
+  }
+  if (area(b, "hand").length) {
+    html += `<div class="section"><h3>Hand <span class="c">${area(b, "hand").length}/${fmt(obj(b.hand).limit)} · selected cards are raised</span></h3>
+      <div class="cards" style="padding:12px 0 18px">${area(b, "hand").map((c, i) => pcHTML(c, i, { sel: sel("hand").has(i), inHand: true })).join("")}</div></div>`;
+  }
+  if (b.state === "SHOP" || area(b, "shop").length && b.state === "SMODS_BOOSTER_OPENED") {
+    const mk = (w, i, label) => (sel(w).has(i) ? label : "");
+    html += `<div class="section"><h3>Shop <span class="c">reroll $${fmt(rnd.reroll_cost)}</span></h3><div class="items" style="padding-top:10px">${list("shop", (c, i) => itHTML(c, i, { cost: true, sel: sel("shop").has(i), mark: mk("shop", i, "BOUGHT") }))}</div>
+      <div class="row2" style="margin-top:12px"><div><h3>Packs</h3><div class="items" style="padding-top:10px">${list("packs", (c, i) => itHTML(c, i, { cost: true, sel: sel("packs").has(i), mark: mk("packs", i, "OPENED") }))}</div></div>
+      <div><h3>Voucher</h3><div class="items" style="padding-top:10px">${list("vouchers", (c, i) => itHTML(c, i, { cost: true, sel: sel("vouchers").has(i), mark: mk("vouchers", i, "REDEEMED") }))}</div></div></div></div>`;
+  }
+  const vouchers = Object.keys(obj(b.used_vouchers));
+  html += `<div class="section foot"><div class="stack" title="cards left to draw"><span>${fmt(obj(b.cards).count ?? area(b, "cards").length)}</span></div><div>
+      <details><summary>Deck: cards left to draw (order hidden, as in the game)</summary>${deckTable(b)}</details>
+      <details><summary>Hand levels</summary>${handLevels(b)}</details>
+      ${vouchers.length ? `<details><summary>Vouchers redeemed (${vouchers.length})</summary><div class="small">${vouchers.map((v) => esc(nice(v))).join(", ")}</div></details>` : ""}</div></div>`;
+  $("#main").innerHTML = html;
+  renderRight(s);
+}
+function happenedHTML(s) {
+  const b = s.before, p = obj(s.params), sc = s.scoring;
+  let h = `<div class="section happen"><h3>What happened</h3><div class="big">${esc(s.text)}</div>`;
+  if (s.error) h += `<div class="err">The game refused it: ${esc(obj(s.error).name)} — ${esc(obj(s.error).message)}</div>`;
+  if (s.method === "play") {
+    const hand = area(b, "hand"), idx = arr(p.cards);
+    const scoring = new Set(sc ? arr(sc.scoring) : []);
+    if (sc) h += `<div class="formula"><span class="lvl">LVL ${fmt(sc.level)}</span>${esc(sc.hand)} · <span class="chips">${fmt(sc.chips)}</span><span class="x">×</span><span class="mult">${fmt(sc.mult)}</span><span class="x">=</span>${fmt(sc.total)}${sc.debuffed ? ' <span class="err small">(debuffed by the boss)</span>' : ""}</div>`;
+    h += `<div class="cards" style="padding-bottom:4px">${idx.map((i) => hand[i] ? pcHTML(hand[i], null, { dim: sc && !scoring.has(cardKeyLabel(hand[i])) }) : "").join("")}</div>`;
+    if (sc && arr(sc.events).length) {
+      h += `<details><summary>How it scored (${arr(sc.events).length} steps; faded cards didn't score)</summary><table><tr><th>Source</th><th>Effect</th><th>Running total</th></tr>` +
+        arr(sc.events).map((e) => `<tr><td>${esc(e.kind === "hand" ? "base " + (sc.hand || "hand") : nice(e.source || e.kind) + (e.kind === "edition" ? " (edition)" : ""))}</td><td>${eventText(e)}</td>` +
+          `<td><span class="chips">${fmt(arr(e.running)[0])}</span> × <span class="mult">${fmt(arr(e.running)[1])}</span></td></tr>`).join("") + "</table></details>";
+    }
+  } else if (s.method === "discard") {
+    const hand = area(b, "hand");
+    h += `<div class="cards">${arr(p.cards).map((i) => (hand[i] ? pcHTML(hand[i], null) : "")).join("")}</div>`;
+  } else if (["buy", "sell", "use", "pack"].includes(s.method) && !p.skip) {
+    const src = s.method === "buy" ? (p.card != null ? area(b, "shop")[p.card] : p.voucher != null ? area(b, "vouchers")[p.voucher] : area(b, "packs")[p.pack])
+      : s.method === "sell" ? (p.joker != null ? area(b, "jokers")[p.joker] : area(b, "consumables")[p.consumable])
+      : s.method === "use" ? area(b, "consumables")[p.consumable] : area(b, "pack")[p.card];
+    if (src) h += `<div class="items" style="padding-top:10px">${itHTML(src, "", { cost: s.method === "buy", reveal: true })}</div>`;
+    const targets = arr(p.cards || p.targets);
+    if (targets.length) h += `<div class="small muted" style="margin-top:8px">on ${targets.map((i) => esc(itemName(area(b, "hand")[i]))).join(", ")}</div>`;
+  } else if (s.method === "cash_out") {
+    h += `<div class="small">Round reward collected.</div>`;
+  }
+  if (s.result && s.result.state && s.result.state !== b.state) h += `<div class="small muted" style="margin-top:8px">→ ${esc(String(s.result.state).replace(/_/g, " ").toLowerCase())}</div>`;
+  return h + "</div>";
+}
+function cardKeyLabel(c) {   // matches the labels the scoring trace uses ("K♥ (bonus, red)")
+  const v = obj(c.value), m = obj(c.modifier);
+  const base = `${RANK[v.rank] || v.rank}${SUIT[v.suit] || ""}`;
+  const extra = [m.enhancement && m.enhancement.toLowerCase(), m.edition && m.edition.toLowerCase(), m.seal && m.seal.toLowerCase()].filter(Boolean);
+  return extra.length ? `${base} (${extra.join(", ")})` : base;
+}
+function eventText(e) {
+  const parts = [];
+  if (num(e.chips)) parts.push(`<span class="chips">+${fmt(e.chips)} chips</span>`);
+  if (num(e.mult)) parts.push(`<span class="mult">+${fmt(e.mult)} mult</span>`);
+  if (num(e.x_mult) || num(e.xmult)) parts.push(`<span class="mult">×${fmt(e.x_mult || e.xmult)} mult</span>`);
+  if (num(e.dollars)) parts.push(`<span class="money">+$${fmt(e.dollars)}</span>`);
+  if (e.kind === "retrigger") parts.push("retrigger");
+  if (e.kind === "hand") parts.push(`level ${fmt(e.level)}`);
+  return parts.join(" ") || esc(e.kind);
 }
 function deckTable(st) {
   const cards = area(st, "cards");
   if (!cards.length) return `<div class="empty">empty</div>`;
-  const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"], suits = ["S", "H", "C", "D"];
-  const n = {}; let other = 0;
-  for (const c of cards) {
-    const v = c.value || {}, m = Array.isArray(c.modifier) ? {} : (c.modifier || {});
-    if (m.enhancement === "STONE" || !v.rank) { other++; continue; }
-    n[v.suit + v.rank] = (n[v.suit + v.rank] || 0) + 1;
-  }
-  const rows = suits.map((s) => `<tr><th class="card ${s}" style="all:unset;color:var(--${{ S: "spades", H: "hearts", C: "clubs", D: "diamonds" }[s]})">${SUIT[s]}</th>` +
-    ranks.map((r) => `<td class="${n[s + r] ? "" : "z"}">${n[s + r] || "·"}</td>`).join("") +
-    `<td><b>${ranks.reduce((a, r) => a + (n[s + r] || 0), 0)}</b></td></tr>`).join("");
-  return `<table class="deckgrid"><tr><th></th>${ranks.map((r) => `<th>${RANK[r] || r}</th>`).join("")}<th>all</th></tr>${rows}</table>` +
-    `<div class="small muted">${cards.length} cards left${other ? ` (${other} stone)` : ""}; order not shown, as in the game's deck view</div>`;
+  const ranks = ["A", "K", "Q", "J", "T", "9", "8", "7", "6", "5", "4", "3", "2"], suits = ["S", "H", "C", "D"], n = {};
+  let other = 0;
+  for (const c of cards) { const v = obj(c.value); if (obj(c.modifier).enhancement === "STONE" || !v.rank) { other++; continue; } n[v.suit + v.rank] = (n[v.suit + v.rank] || 0) + 1; }
+  const col = { S: "spades", H: "hearts", C: "clubs", D: "diamonds" };
+  return `<table class="deckgrid"><tr><th></th>${ranks.map((r) => `<th>${RANK[r] || r}</th>`).join("")}<th>all</th></tr>` +
+    suits.map((s) => `<tr><th style="color:var(--${col[s]});font-size:16px">${SUIT[s]}</th>${ranks.map((r) => `<td class="${n[s + r] ? "" : "z"}">${n[s + r] || "·"}</td>`).join("")}<td><b>${ranks.reduce((a, r) => a + (n[s + r] || 0), 0)}</b></td></tr>`).join("") +
+    `</table><div class="small muted">${cards.length} cards left${other ? ` (${other} stone)` : ""}</div>`;
 }
 function handLevels(st) {
-  const hs = Object.entries((st || {}).hands || {}).sort((a, b) => (a[1].order ?? 0) - (b[1].order ?? 0));
+  const hs = Object.entries(obj(obj(st).hands)).sort((a, b) => (a[1].order ?? 0) - (b[1].order ?? 0));
   if (!hs.length) return "";
-  return `<table><tr><th>Hand</th><th>Lvl</th><th>Chips × Mult</th><th>Played</th></tr>` + hs.map(([k, h]) =>
-    `<tr${h.level > 1 ? ' class="best"' : ""}><td>${esc(k)}</td><td>${h.level}</td><td>${fmt(h.chips)} × ${fmt(h.mult)}</td><td>${h.played}${h.played_this_round ? ` (${h.played_this_round} now)` : ""}</td></tr>`).join("") + "</table>";
-}
-function renderBoard(step) {
-  const st = step.before || step.result || {};
-  const rnd = st.round || {};
-  const curB = Object.values(st.blinds || {}).find((b) => b.status === "CURRENT");
-  const target = curB ? curB.score : null;
-  const progress = target ? Math.min(100, (100 * (rnd.chips || 0)) / target) : 0;
-  const blinds = ["small", "big", "boss"].map((k) => (st.blinds || {})[k]).filter(Boolean).map((b) =>
-    `<div class="blind ${esc(b.status)}"><div class="nm">${esc(b.name)}</div><div>${fmt(b.score)} chips · <span class="muted">${esc(String(b.status || "").toLowerCase())}</span></div>` +
-    (b.effect ? `<div class="ef">${esc(b.effect)}</div>` : "") + (b.tag_name ? `<div class="ef">Skip: ${esc(b.tag_name)}</div>` : "") + "</div>").join("");
-  const sel = (w) => selected(step, w);
-  const list = (k, fn) => { const cs = area(st, k); return cs.length ? cs.map(fn).join("") : `<div class="empty">none</div>`; };
-  let html = `<h2>Game state before this step · ${esc(st.state || "?")}</h2>
-    <div class="kv"><div>Ante <b>${fmt(st.ante_num)}</b></div><div>Round <b>${fmt(st.round_num)}</b></div><div>Money <b>$${fmt(st.money)}</b></div>
-      <div>Hands <b>${fmt(rnd.hands_left)}</b></div><div>Discards <b>${fmt(rnd.discards_left)}</b></div>
-      ${curB ? `<div>${esc(curB.name)}: <b>${fmt(rnd.chips || 0)}</b> / ${fmt(target)}</div>` : ""}</div>
-    ${curB ? `<div class="bar"><span style="width:${progress}%"></span></div>` : ""}
-    <h3>Blinds</h3><div class="blinds">${blinds || '<div class="empty">–</div>'}</div>
-    <h3>Jokers (${area(st, "jokers").length}/${(st.jokers || {}).limit ?? "?"})</h3><div class="items">${list("jokers", (c, i) => itemHTML(c, i, { sell: true, sel: sel("jokers").has(i) }))}</div>
-    <h3>Consumables (${area(st, "consumables").length}/${(st.consumables || {}).limit ?? "?"})</h3><div class="items">${list("consumables", (c, i) => itemHTML(c, i, { sel: sel("consumables").has(i) }))}</div>`;
-  if (area(st, "hand").length) html += `<h3>Hand (${area(st, "hand").length}/${(st.hand || {}).limit ?? "?"})</h3><div class="cards">${area(st, "hand").map((c, i) => cardHTML(c, i, { sel: sel("hand").has(i), inHand: true })).join("")}</div>`;
-  if (st.state === "SHOP") {
-    html += `<h3>Shop · reroll $${rnd.reroll_cost ?? "?"}</h3><div class="items">${list("shop", (c, i) => itemHTML(c, i, { cost: true, sel: sel("shop").has(i) }))}</div>
-      <h3>Vouchers</h3><div class="items">${list("vouchers", (c, i) => itemHTML(c, i, { cost: true, sel: sel("vouchers").has(i) }))}</div>
-      <h3>Packs</h3><div class="items">${list("packs", (c, i) => itemHTML(c, i, { cost: true, sel: sel("packs").has(i) }))}</div>`;
-  }
-  if (area(st, "pack").length) html += `<h3>Open pack</h3><div class="items">${area(st, "pack").map((c, i) => (c.value || {}).rank ? cardHTML(c, i, { sel: sel("pack").has(i), reveal: true }) : itemHTML(c, i, { sel: sel("pack").has(i) })).join("")}</div>`;
-  const vouchers = Object.keys(st.used_vouchers || {});
-  if (vouchers.length) html += `<h3>Vouchers redeemed</h3><div class="small">${vouchers.map(esc).join(", ")}</div>`;
-  html += `<details style="margin-top:12px"><summary><b>Deck</b> <span class="muted small">(cards left to draw)</span></summary>${deckTable(st)}</details>
-    <details style="margin-top:8px"><summary><b>Hand levels</b></summary>${handLevels(st)}</details>`;
-  $("#board").innerHTML = html;
+  return `<table><tr><th>Hand</th><th>Level</th><th><span class="chips">Chips</span> × <span class="mult">Mult</span></th><th>Played</th></tr>` + hs.map(([k, h]) =>
+    `<tr${h.level > 1 ? ' class="best"' : ""}><td>${esc(k)}</td><td>${fmt(h.level)}</td><td><span class="chips">${fmt(h.chips)}</span> × <span class="mult">${fmt(h.mult)}</span></td><td>${fmt(h.played)}</td></tr>`).join("") + "</table>";
 }
 
-// ---------- rendering the decision ----------
-function describe(step) {
-  const st = step.before || {}, p = step.params || {};
-  const names = (k, idx) => arr(idx).map((i) => {
-    const c = area(st, k)[i];
-    if (!c) return `#${i}`;
-    const v = c.value || {};
-    return k === "hand" && v.rank ? `${RANK[v.rank] || v.rank}${SUIT[v.suit] || ""}` : (c.label || c.key);
-  }).join(", ");
-  switch (step.method) {
-    case "play": return `Play ${names("hand", p.cards)}`;
-    case "discard": return `Discard ${names("hand", p.cards)}`;
-    case "buy": return p.card != null ? `Buy ${names("shop", p.card)}` : p.voucher != null ? `Redeem ${names("vouchers", p.voucher)}` : `Buy pack ${names("packs", p.pack)}`;
-    case "sell": return p.joker != null ? `Sell ${names("jokers", p.joker)}` : `Sell ${names("consumables", p.consumable)}`;
-    case "use": return `Use ${names("consumables", p.consumable)}` + (p.cards ? ` on ${names("hand", p.cards)}` : "");
-    case "pack": return p.skip ? "Skip the pack" : `Take ${names("pack", p.card)}` + (p.targets ? ` on ${names("hand", p.targets)}` : "");
-    case "reroll": return "Reroll the shop";
-    case "next_round": return "Leave the shop";
-    case "cash_out": return "Cash out";
-    case "select": return "Play the blind";
-    case "skip": return "Skip the blind";
-    case "set": return `Assist: set ${Object.entries(p).map(([k, v]) => `${k} = ${v}`).join(", ")}`;
-    case "start": return `Start run (${p.deck} / ${p.stake}, seed ${p.seed})`;
-    case "rearrange": return "Rearrange " + Object.keys(p).join(", ");
-    default: return `${step.method} ${JSON.stringify(p)}`;
+// ------------------------------------------------------------------ decision panel
+function renderRight(s) {
+  const d = s.decision;
+  const label = { llm: "Model decision", policy: "Bot decision", assist: "Assist (not a decision)", auto: "Automatic step" }[s.actor] || s.actor;
+  let h = `<h3>Decision</h3><span class="who ${esc(s.actor)}">${esc(label)}</span> <span class="small muted">t = ${fmt(s.t)} s</span>`;
+  if (d) {
+    const out = obj(d.model_output);
+    const reasons = [...arr(d.reasoning), d.action_reasoning].filter(Boolean);
+    if (out.reasoning && !reasons.includes(out.reasoning)) reasons.unshift(out.reasoning);
+    if (reasons.length) h += `<h3>Reasoning</h3><div class="reason">${esc(reasons.join("\n\n"))}</div>`;
+    if (arr(d.tool_calls).length) h += `<h3>Analysis tools (${arr(d.tool_calls).length})</h3>` + arr(d.tool_calls).map((t) => toolHTML(t, s)).join("");
+    if (arr(out.tool_calls).length) h += `<details><summary>Model's final answer (training target)</summary><pre class="json">${esc(JSON.stringify(out, null, 2))}</pre></details>`;
+    const u = [];
+    if (d.model_calls) u.push(`${d.model_calls} model call${d.model_calls > 1 ? "s" : ""}`);
+    if (obj(d.tokens).prompt) u.push(`${fmt(d.tokens.prompt)} prompt / ${fmt(d.tokens.completion)} output tokens${d.tokens.cached ? ` (${fmt(d.tokens.cached)} cached)` : ""}`);
+    if (d.seconds) u.push(`${fmt(d.seconds)} s to decide`);
+    if (d.cost_usd) u.push(`$${d.cost_usd.toFixed(4)}`);
+    if (u.length) h += `<div class="small muted" style="margin-top:10px">${u.join(" · ")}</div>`;
+    if (arr(d.custom_ids).length) h += `<div class="small muted">exact prompt: requests.jsonl ids ${esc(arr(d.custom_ids).join(", "))}</div>`;
+  } else if (s.actor === "auto") h += `<p class="small muted">The harness did this on its own (BalatroLLM selects blinds and cashes out automatically).</p>`;
+  for (const n of R.notesBy[cur] || []) {
+    h += `<h3>Invalid answer after this step</h3><div class="err">${esc(n.text)}</div>`;
+    const nd = obj(n.decision), rs = [...arr(nd.reasoning), obj(nd.model_output).content].filter(Boolean);
+    if (rs.length) h += `<div class="reason">${esc(rs.join("\n\n"))}</div>`;
   }
-}
-function deltas(step) {
-  const a = step.before || {}, b = step.result;
-  if (!b) return "";
-  const out = [];
-  const d = (x, y, label, money) => {
-    if (x == null || y == null || x === y) return;
-    const up = y > x;
-    out.push(`${label} <b class="${up ? "up" : "down"}">${up ? "+" : "−"}${money ? "$" : ""}${fmt(Math.abs(y - x))}</b>`);
+  h += `<h3>Your notes</h3><textarea id="note" placeholder="Notes stay in this browser for this record.">${esc(notes[cur] || "")}</textarea>
+    <div style="display:flex;gap:6px;margin-top:6px"><button id="exportNotes">Export notes</button><label class="btn">Import notes<input type="file" id="importNotes" accept=".json" hidden></label></div>`;
+  $("#right").innerHTML = h;
+  $("#note").oninput = (e) => {
+    if (e.target.value) notes[cur] = e.target.value; else delete notes[cur];
+    try { localStorage.setItem("bvn:" + R.id, JSON.stringify(notes)); } catch (err) {}
+    const row = document.querySelector(`.act[data-i="${cur}"]`);
+    if (row && !!e.target.value !== !!row.querySelector(".note")) drawActions();
   };
-  if (step.method === "play" && (a.round || {}).chips != null && (b.round || {}).chips != null && b.state === "SELECTING_HAND") d(a.round.chips, b.round.chips, "score", false);
-  if (step.method === "play" && b.state !== "SELECTING_HAND") out.push(`→ ${esc(b.state)}`);
-  d(a.money, b.money, "money", true);
-  if (a.state !== b.state && step.method !== "play") out.push(`→ ${esc(b.state)}`);
-  if (a.ante_num !== b.ante_num && b.ante_num) out.push(`ante ${b.ante_num}`);
-  return out.join(" · ");
+  $("#exportNotes").onclick = () => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([JSON.stringify({ record: R.id, header: R.header, notes }, null, 2)], { type: "application/json" }));
+    a.download = `notes_${R.header.seed || "game"}.json`; a.click(); URL.revokeObjectURL(a.href);
+  };
+  $("#importNotes").onchange = async (e) => {
+    try { const o = JSON.parse(await e.target.files[0].text()); notes = { ...notes, ...obj(o.notes) }; localStorage.setItem("bvn:" + R.id, JSON.stringify(notes)); } catch (err) {}
+    drawActions(); render();
+  };
 }
-function toolHTML(t, step) {
-  const r = t.result || {};
-  let body = "";
+function toolHTML(t, s) {
+  const r = obj(t.result), p = obj(s.params);
+  let body;
   if (r.error) body = `<div class="err">${esc(r.error)}</div>`;
   else if (t.name === "score_plays" && r.plays) {
-    body = `<div class="small muted">need ${fmt(r.chips_needed)} more · ${r.hands_left} hands, ${r.discards_left} discards${r.face_down_cards ? ` · face down: ${r.face_down_cards}` : ""}${r.forced_card != null ? ` · forced card ${r.forced_card}` : ""}</div>` +
-      `<table><tr><th>Cards</th><th>Hand</th><th>Min</th><th>Avg</th><th>Max</th></tr>` + r.plays.map((p, i) =>
-        `<tr${i === 0 ? ' class="best"' : ""}><td>${esc(arr(p.cards).join(", "))}</td><td>${esc(p.hand)}</td><td>${fmt(p.min_score)}</td><td>${fmt(p.avg_score)}</td><td>${fmt(p.max_score)}</td></tr>`).join("") + "</table>" +
-      (r.note ? `<div class="small muted">${esc(r.note)}</div>` : "");
+    body = `<div class="small muted">needs ${fmt(r.chips_needed)} more · ${fmt(r.hands_left)} hands, ${fmt(r.discards_left)} discards${r.face_down_cards ? ` · face down: ${esc(arr(r.face_down_cards).join(", "))}` : ""}</div>
+      <table><tr><th>Cards</th><th>Hand</th><th>Guaranteed</th><th>Average</th><th>Best case</th></tr>` + arr(r.plays).map((x, i) =>
+      `<tr${i === 0 ? ' class="best"' : ""}><td>${esc(arr(x.cards).join(", "))}</td><td>${esc(x.hand)}</td><td>${fmt(x.min_score)}</td><td>${fmt(x.avg_score)}</td><td>${fmt(x.max_score)}</td></tr>`).join("") + "</table>";
   } else if ((t.name === "estimate_clear_chance" || t.name === "round_search") && r.results) {
     const label = (x) => x.action || (x.play ? "play " + arr(x.play).join(", ") : x.discard ? "discard " + arr(x.discard).join(", ") : "?");
-    const p = (step && step.params) || {};
-    const chosen = step && ["play", "discard"].includes(step.method) && p.cards
-      ? (t.name === "round_search" ? `${step.method === "play" ? "PlayHand" : "Discard"}(${arr(p.cards).join(", ")})` : `${step.method} ${arr(p.cards).join(", ")}`) : null;
-    const rows = [...r.results].sort((a, b) => (b.clear_chance ?? -1) - (a.clear_chance ?? -1) || (b.mean_progress ?? -1) - (a.mean_progress ?? -1));
-    body = `<table><tr><th>Candidate</th><th>Clear chance</th><th>Progress</th></tr>` + rows.map((x) =>
-      `<tr${label(x) === chosen ? ' class="best"' : ""}><td>${esc(label(x))}${label(x) === chosen ? ' <span class="badge">chosen</span>' : ""}</td>` +
+    const chosen = ["play", "discard"].includes(s.method) && p.cards ? (t.name === "round_search" ? `${s.method === "play" ? "PlayHand" : "Discard"}(${arr(p.cards).join(", ")})` : `${s.method} ${arr(p.cards).join(", ")}`) : null;
+    const rows = [...arr(r.results)].sort((a, b) => (b.clear_chance ?? -1) - (a.clear_chance ?? -1) || (b.mean_progress ?? -1) - (a.mean_progress ?? -1));
+    body = `<table><tr><th>Option</th><th>Clears</th><th>Progress</th></tr>` + rows.map((x) => `<tr${label(x) === chosen ? ' class="best"' : ""}><td>${esc(label(x))}${label(x) === chosen ? " ✓" : ""}</td>` +
       `<td>${x.error ? `<span class="err">${esc(x.error)}</span>` : pct(x.clear_chance)}</td><td>${x.mean_progress == null ? "" : pct(x.mean_progress)}</td></tr>`).join("") + "</table>" +
-      `<div class="small muted">${r.worlds ? r.worlds + " sampled futures · " : ""}sorted by clear chance; the chosen action is marked</div>`;
+      `<div class="small muted">${r.worlds ? fmt(r.worlds) + " imagined futures · " : ""}✓ = what was chosen</div>`;
   } else if (t.name === "optimize_jokers" && (r.best_order || r.error)) {
-    const play = (x) => x ? `cards ${esc(arr(x.cards).join(", "))}: min ${fmt(x.min)} · avg ${fmt(x.avg)} · max ${fmt(x.max)}` : "–";
-    body = `<table><tr><th></th><th>Joker order</th><th>Best play</th></tr>` +
-      `<tr><td>now</td><td>${esc(arr(r.current_order).join(" → "))}</td><td>${play(r.best_play_now)}</td></tr>` +
-      `<tr class="best"><td>best</td><td>${esc(arr(r.best_order).join(" → "))}</td><td>${play(r.best_play_with_best_order)}</td></tr></table>` +
-      `<div class="small muted">${r.rearrange ? `gain ${fmt(r.gain_guaranteed)} guaranteed chips; rearrange ${esc(JSON.stringify(r.rearrange))}` : "already in the best order"} · ${esc(r.method)}${r.note ? " · " + esc(r.note) : ""}</div>`;
+    const pl = (x) => x ? `${esc(arr(x.cards).join(", "))}: <b>${fmt(x.min)}</b> (avg ${fmt(x.avg)}, best ${fmt(x.max)})` : "–";
+    body = `<table><tr><th></th><th>Joker order</th><th>Best play</th></tr><tr><td>now</td><td>${esc(arr(r.current_order).map(nice).join(" → "))}</td><td>${pl(r.best_play_now)}</td></tr>
+      <tr class="best"><td>best</td><td>${esc(arr(r.best_order).map(nice).join(" → "))}</td><td>${pl(r.best_play_with_best_order)}</td></tr></table>
+      <div class="small muted">${r.rearrange ? `+${fmt(r.gain_guaranteed)} guaranteed chips by rearranging` : "already the best order"} · ${esc(r.method)}</div>`;
   } else if (t.name === "optimize_hand" && r.plays) {
-    body = `<table><tr><th>Cards</th><th>Scoring order</th><th>Hand</th><th>Min</th><th>Avg</th><th>Max</th><th>Gain from order</th></tr>` +
-      r.plays.map((p, i) => `<tr${i === 0 ? ' class="best"' : ""}><td>${esc(arr(p.cards).join(", "))}</td><td>${esc(arr(p.scoring_order).join(", "))}</td>` +
-        `<td>${esc(p.hand)}</td><td>${fmt(p.min)}</td><td>${fmt(p.avg)}</td><td>${fmt(p.max)}</td><td>${p.rearrange ? "+" + fmt(p.gain_guaranteed_vs_hand_order) : "–"}</td></tr>`).join("") +
-      "</table>" + (r.note ? `<div class="small muted">${esc(r.note)}</div>` : "");
+    body = `<table><tr><th>Cards</th><th>Order</th><th>Hand</th><th>Guaranteed</th><th>Avg</th><th>Gain</th></tr>` + arr(r.plays).map((x, i) =>
+      `<tr${i === 0 ? ' class="best"' : ""}><td>${esc(arr(x.cards).join(", "))}</td><td>${esc(arr(x.scoring_order).join(", "))}</td><td>${esc(x.hand)}</td><td>${fmt(x.min)}</td><td>${fmt(x.avg)}</td><td>${x.rearrange ? "+" + fmt(x.gain_guaranteed_vs_hand_order) : "–"}</td></tr>`).join("") + "</table>";
   } else body = `<pre class="json">${esc(JSON.stringify(r, null, 2))}</pre>`;
-  const args = t.arguments && Object.keys(t.arguments).length ? `<div class="small muted">arguments: <code>${esc(JSON.stringify(t.arguments))}</code></div>` : "";
-  return `<details class="tool" open><summary>${esc(t.name)}${t.seconds != null ? ` <span class="muted small">${fmt(t.seconds)} s</span>` : ""}</summary><div>${args}${body}</div></details>`;
-}
-function renderDecision(step) {
-  const d = step.decision;
-  let html = `<h2>Step ${step.i + 1} of ${REC.steps.length}</h2>
-    <div><span class="badge ${esc(step.actor)}">${esc(step.actor === "llm" ? "model decision" : step.actor === "policy" ? "policy decision" : step.actor)}</span>
-      <span class="muted small">t = ${fmt(step.t)} s${step.seconds != null ? ` · game took ${fmt(step.seconds)} s` : ""}</span></div>
-    <div class="action">${esc(describe(step))}</div>
-    <div class="delta">${deltas(step)}</div>`;
-  if (step.error) html += `<div class="err">Refused: ${esc(step.error.name)} — ${esc(step.error.message)}</div>`;
-  if (d) {
-    const reasons = [...(d.reasoning || [])];
-    if (d.action_reasoning) reasons.push(d.action_reasoning);
-    if (reasons.length) html += `<h3>Reasoning</h3><div class="reason">${esc(reasons.join("\n\n"))}</div>`;
-    if ((d.tool_calls || []).length) html += `<h3>Analysis (${d.tool_calls.length})</h3>` + d.tool_calls.map((t) => toolHTML(t, step)).join("");
-    const usage = [];
-    if (d.model_calls) usage.push(`${d.model_calls} model call${d.model_calls > 1 ? "s" : ""}`);
-    if (d.tokens && d.tokens.prompt) usage.push(`${fmt(d.tokens.prompt)} in / ${fmt(d.tokens.completion)} out tokens${d.tokens.cached ? ` (${fmt(d.tokens.cached)} cached)` : ""}`);
-    if (d.cost_usd) usage.push(`$${d.cost_usd.toFixed(4)}`);
-    if (d.seconds) usage.push(`${fmt(d.seconds)} s thinking`);
-    if (usage.length) html += `<div class="small muted" style="margin-top:8px">${usage.join(" · ")}</div>`;
-  }
-  for (const n of REC.notesByStep[step.i] || []) {
-    html += `<h3>After this step</h3><div class="err">${esc(n.text)}</div>`;
-    if (n.decision && (n.decision.reasoning || []).length) html += `<div class="reason">${esc(n.decision.reasoning.join("\n\n"))}</div>`;
-  }
-  $("#decision").innerHTML = html;
-}
-function render() {
-  const steps = REC.steps;
-  if (!steps.length) return;
-  cur = Math.max(0, Math.min(cur, steps.length - 1));
-  const step = steps[cur];
-  renderBoard(step);
-  renderDecision(step);
-  document.querySelectorAll(".tick.cur").forEach((t) => t.classList.remove("cur"));
-  const tick = document.querySelector(`.tick[data-i="${cur}"]`);
-  if (tick) { tick.classList.add("cur"); tick.scrollIntoView({ block: "nearest", inline: "nearest" }); }
-  const line = document.getElementById("curLine");
-  if (line) { const x = (cur / Math.max(1, steps.length - 1)) * 1000; line.setAttribute("x1", x); line.setAttribute("x2", x); }
-  const decs = steps.filter(isDecision).length;
-  $("#pos").textContent = `step ${cur + 1}/${steps.length} · ${decs} decisions`;
-  $("#note").value = userNotes[cur] || "";
+  const args = Object.keys(obj(t.arguments)).length ? `<div class="small muted">asked: <code>${esc(JSON.stringify(t.arguments))}</code></div>` : "";
+  return `<details class="tool" open><summary>${esc(t.name)}${t.seconds != null ? ` <span class="small muted">${fmt(t.seconds)} s</span>` : ""}</summary><div>${args}${body}</div></details>`;
 }
 
-// ---------- notes ----------
-$("#note").addEventListener("input", (e) => {
-  const v = e.target.value;
-  if (v) userNotes[cur] = v; else delete userNotes[cur];
-  try { localStorage.setItem("bv-notes:" + REC.id, JSON.stringify(userNotes)); } catch (err) {}
-  const tick = document.querySelector(`.tick[data-i="${cur}"]`);
-  if (tick) tick.classList.toggle("hasnote", !!v);
+// ------------------------------------------------------------------ summary
+function renderSummary() {
+  const st = R.steps, e = R.end || {}, h = R.header, p = obj(h.player);
+  const blinds = [];
+  let curB = null;
+  for (const s of st) {
+    if (s.method === "select") { const bl = currentBlind(s.before) || {}; curB = { ante: s.before.ante_num, name: bl.name, effect: bl.effect, target: bl.score, hands: 0, discards: 0, best: 0, scored: 0, outcome: "playing" }; blinds.push(curB); }
+    if (s.method === "skip") { const bl = currentBlind(s.before) || {}; blinds.push({ ante: s.before.ante_num, name: bl.name, target: bl.score, outcome: `skipped for ${bl.tag_name || "a tag"}` }); }
+    if (curB && s.method === "play" && !s.error) { curB.hands++; if (s.scoring) curB.best = Math.max(curB.best, num(s.scoring.total) || 0); curB.scored = Math.max(curB.scored, num(obj(obj(s.result).round).chips) || 0); }
+    if (curB && s.method === "discard" && !s.error) curB.discards++;
+    if (curB && s.method === "set" && num(obj(s.params).chips) != null) curB.assisted = true;
+    if (curB && s.result && ["ROUND_EVAL", "SHOP"].includes(s.result.state) && curB.outcome === "playing") curB.outcome = "cleared";
+    if (curB && s.result && s.result.state === "GAME_OVER") curB.outcome = "lost";
+  }
+  if (e.won && blinds.length) blinds[blinds.length - 1].outcome = "cleared";
+  const shops = R.sections.filter((x) => x.kind === "shop").map((x) => {
+    const acts = x.idx.map((i) => st[i]);
+    return { ante: st[x.idx[0]].before.ante_num, spent: acts.reduce((a, s) => a + (s.money < 0 ? -s.money : 0), 0),
+      got: acts.filter((s) => ["buy", "pack"].includes(s.method) && !obj(s.params).skip && !s.error).map((s) => s.text.replace(/^(Bought|Redeemed|Opened|Took) /, "")),
+      rerolls: acts.filter((s) => s.method === "reroll" && !s.error).length };
+  });
+  const jokerEvents = st.filter((s) => !s.error && ((s.method === "buy" && obj(s.params).card != null && (area(s.before, "shop")[obj(s.params).card] || {}).set === "JOKER") ||
+    (s.method === "sell" && obj(s.params).joker != null) || (s.method === "pack" && (area(s.before, "pack")[obj(s.params).card] || {}).set === "JOKER")));
+  // the final build: the last state whose jokers are all face up (bosses like Amber Acorn flip them)
+  const states = st.map((s) => s.result || s.before).filter(Boolean).reverse();
+  const last = states.find((x) => area(x, "jokers").every((c) => !obj(c.state).hidden)) || states[0] || {};
+  const decs = st.filter((s) => s.decision), toolCounts = {};
+  let tok = 0, think = 0;
+  for (const s of decs) { for (const t of arr(s.decision.tool_calls)) toolCounts[t.name] = (toolCounts[t.name] || 0) + 1;
+    tok += (obj(s.decision.tokens).prompt || 0) + (obj(s.decision.tokens).completion || 0); think += s.decision.seconds || 0; }
+  const refused = st.filter((s) => s.error && s.actor !== "auto").length;
+  const plays = st.filter((s) => s.scoring).sort((a, b) => (b.scoring.total || 0) - (a.scoring.total || 0)).slice(0, 5);
+  const won = !!e.won;
+  let html = `<div class="banner ${won ? "won" : "lost"}"><div class="big">${won ? "Run won" : e.ante ? `Lost at ante ${esc(e.ante)}` : "Run in progress"}${R.assisted ? ' <span class="pill assist">assisted</span>' : ""}</div>
+    <div class="facts"><span>Seed <b class="mono">${esc(h.seed)}</b></span><span><b>${esc(nice(h.deck))}</b> Deck</span><span><b>${esc(nice(h.stake))}</b> Stake</span>
+    <span>Played by <b>${esc(p.kind === "llm" ? p.model : (p.label || "?") + " bot")}</b>${p.tools ? " with tools" : ""}</span><span><b>${fmt(st.length)}</b> steps</span>
+    <span><b>${fmt(e.seconds)}</b> s</span>${e.cost_usd ? `<span><b>$${e.cost_usd.toFixed(3)}</b></span>` : ""}</div>
+    ${R.assisted ? '<div class="small" style="margin-top:8px;color:var(--assist)">Assisted run: money was topped up and/or the score set just short of the target, so this is not a real result.</div>' : ""}</div>`;
+  html += `<div class="section"><h3>Blinds</h3><table><tr><th>Ante</th><th>Blind</th><th>Target</th><th>Scored</th><th>Best hand</th><th>Hands</th><th>Discards</th><th>Result</th></tr>` +
+    blinds.map((x) => `<tr><td>${fmt(x.ante)}</td><td>${esc(x.name)}${x.effect ? `<div class="small muted">${esc(x.effect)}</div>` : ""}</td><td>${fmt(x.target)}</td>
+      <td>${x.scored != null ? fmt(x.scored) : "–"}${x.assisted ? ' <span class="small" style="color:var(--assist)">(assisted)</span>' : ""}</td><td>${x.best ? fmt(x.best) : "–"}</td><td>${x.hands ?? "–"}</td><td>${x.discards ?? "–"}</td>
+      <td class="${x.outcome === "cleared" ? "up" : x.outcome === "lost" ? "down" : ""}">${esc(x.outcome)}</td></tr>`).join("") + "</table></div>";
+  html += `<div class="grid2"><div class="section"><h3>Money over the run</h3>${moneyChart()}</div>
+    <div class="section"><h3>Best hands</h3><table><tr><th>Hand</th><th>Score</th><th>Ante</th></tr>${plays.map((s) => `<tr><td>${esc(s.scoring.hand)} <span class="small muted">lvl ${fmt(s.scoring.level)}</span></td><td><span class="chips">${fmt(s.scoring.chips)}</span> × <span class="mult">${fmt(s.scoring.mult)}</span> = <b>${fmt(s.scoring.total)}</b></td><td>${fmt(s.before.ante_num)}</td></tr>`).join("") || '<tr><td colspan="3" class="empty">no hands played</td></tr>'}</table></div></div>`;
+  html += `<div class="section"><h3>Final build</h3><div class="items" style="padding-top:8px">${area(last, "jokers").map((c, i) => itHTML(c, i, {})).join("") || '<div class="empty">no jokers</div>'}</div>
+    <div class="small muted" style="margin-top:10px">Vouchers: ${Object.keys(obj(last.used_vouchers)).map(nice).map(esc).join(", ") || "none"}</div></div>`;
+  html += `<div class="grid2"><div class="section"><h3>Shops</h3><table><tr><th>#</th><th>Ante</th><th>Spent</th><th>Rerolls</th><th>Got</th></tr>${shops.map((x, i) => `<tr><td>${i + 1}</td><td>${fmt(x.ante)}</td><td class="money">$${fmt(x.spent)}</td><td>${x.rerolls}</td><td>${esc(x.got.join(", ")) || '<span class="muted">nothing</span>'}</td></tr>`).join("") || '<tr><td colspan="5" class="empty">no shops</td></tr>'}
+      <tr><td></td><td><b>Total</b></td><td class="money">$${fmt(shops.reduce((a, x) => a + x.spent, 0))}</td><td>${shops.reduce((a, x) => a + x.rerolls, 0)}</td><td></td></tr></table></div>
+    <div class="section"><h3>Jokers over the run</h3><table><tr><th>Ante</th><th>Event</th></tr>${jokerEvents.map((s) => `<tr><td>${fmt(s.before.ante_num)}</td><td class="${s.method === "sell" ? "down" : "up"}">${esc(s.text)}</td></tr>`).join("") || '<tr><td colspan="2" class="empty">none</td></tr>'}</table></div></div>`;
+  html += `<div class="section"><h3>${p.kind === "llm" ? "Model" : "Decisions"}</h3><div class="facts" style="justify-content:flex-start">
+    <span><b>${decs.length}</b> decisions</span><span><b>${R.notes.length}</b> invalid answers</span><span><b>${refused}</b> refused actions</span>
+    ${Object.entries(toolCounts).map(([k, v]) => `<span><b>${v}</b> × ${esc(k)}</span>`).join("")}
+    ${tok ? `<span><b>${fmt(tok)}</b> tokens</span>` : ""}${think ? `<span><b>${fmt(think)}</b> s deciding</span>` : ""}</div></div>`;
+  $("#main").innerHTML = html;
+  $("#right").innerHTML = `<h3>About this run</h3><pre class="json">${esc(JSON.stringify({ header: R.header, end: R.end }, null, 2))}</pre>`;
+  document.querySelectorAll("svg.chart").forEach((svg) => svg.onclick = (ev) => {
+    const r = svg.getBoundingClientRect(); cur = Math.round(((ev.clientX - r.left) / r.width) * (R.steps.length - 1)); setView("game"); });
+}
+function moneyChart() {
+  const st = R.steps, n = Math.max(1, st.length - 1), W = 600, H = 150;
+  const m = st.map((s) => num(obj(s.result || s.before).money) ?? 0), max = Math.max(10, ...m);
+  const x = (i) => (i / n) * W, y = (v) => H - 8 - (v / max) * (H - 24);
+  let antes = "";
+  st.forEach((s, i) => { if (i && obj(s.result).ante_num !== obj(st[i - 1].result).ante_num && obj(s.result).ante_num)
+    antes += `<line x1="${x(i)}" x2="${x(i)}" y1="0" y2="${H}" stroke="var(--line)"/><text x="${x(i) + 3}" y="12" font-size="10" fill="var(--muted)">A${obj(s.result).ante_num}</text>`; });
+  const path = m.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${antes}<path d="${path}" fill="none" stroke="var(--money)" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <text x="4" y="${H - 2}" font-size="10" fill="var(--muted)">max $${max} · click to jump there</text></svg>`;
+}
+
+// ------------------------------------------------------------------ keys
+document.addEventListener("keydown", (e) => {
+  if (!R || ["TEXTAREA", "INPUT"].includes(e.target.tagName)) return;
+  const N = R.steps.length, isDec = (i) => !!R.steps[i].decision;
+  const go = (i) => { if (i != null && i >= 0 && i < N) { cur = i; setView("game"); } };
+  const find = (from, dir, pred) => { for (let i = from; i >= 0 && i < N; i += dir) if (pred(i)) return i; return null; };
+  const k = e.key;
+  if (k === "ArrowDown" || k === "ArrowRight") go(e.shiftKey ? find(cur + 1, 1, isDec) : cur + 1);
+  else if (k === "ArrowUp" || k === "ArrowLeft") go(e.shiftKey ? find(cur - 1, -1, isDec) : cur - 1);
+  else if (k === "]") { const sec = R.steps[cur].section, j = R.sections.indexOf(sec); if (R.sections[j + 1]) go(R.sections[j + 1].idx[0]); }
+  else if (k === "[") { const sec = R.steps[cur].section, j = R.sections.indexOf(sec); go(cur !== sec.idx[0] ? sec.idx[0] : R.sections[j - 1] && R.sections[j - 1].idx[0]); }
+  else if (k === "Home") go(0); else if (k === "End") go(N - 1);
+  else if (k === "s" || k === "S") setView(view === "summary" ? "game" : "summary");
+  else if (k === "n" || k === "N") { const t = $("#note"); if (t) { e.preventDefault(); t.focus(); } return; }
+  else if (k === "/") { e.preventDefault(); $("#search").focus(); return; }
+  else return;
+  e.preventDefault();
 });
-$("#exportNotes").onclick = () => {
-  const blob = new Blob([JSON.stringify({ record: REC.id, header: REC.header, notes: userNotes }, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = `notes_${REC.header.seed || "game"}.json`;
-  a.click();
-  URL.revokeObjectURL(a.href);
-};
-$("#importNotes").onchange = async (e) => {
-  const f = e.target.files[0];
-  if (!f || !REC) return;
-  try {
-    const o = JSON.parse(await f.text());
-    userNotes = { ...userNotes, ...(o.notes || {}) };
-    localStorage.setItem("bv-notes:" + REC.id, JSON.stringify(userNotes));
-  } catch (err) {}
-  drawTimeline(); render();
-};
 </script>
 </body>
 </html>

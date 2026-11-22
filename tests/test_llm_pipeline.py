@@ -52,6 +52,13 @@ def test_parallel_games_with_tools_logs_and_export(tmp_path: Path):
         calls = [t for x in llm for t in x["decision"]["tool_calls"]]
         assert {t["name"] for t in calls} >= {"score_plays", "estimate_clear_chance"}
         assert all(isinstance(t["result"], dict) for t in calls)
+        # the model's final answer (the training target) and the exact prompt ids are kept
+        assert all(x["decision"]["model_output"]["tool_calls"] for x in llm)
+        assert all(x["decision"]["model_output"]["tool_calls"][-1]["name"] == x["method"] for x in llm)
+        assert all(x["decision"]["custom_ids"] for x in llm)
+        # every accepted play has its scoring breakdown, and it is the score the game gave it
+        plays = [x for x in llm if x["method"] == "play" and not x.get("error")]
+        assert plays and all(x["scoring"]["total"] > 0 and x["scoring"]["events"] for x in plays)
     stats = export(tmp_path / "runs", tmp_path / "sft.jsonl",
                    Filters(keep_outcomes=("successful", "local_tool"), models=("mock-model",)))
     assert stats["runs"] == 2 and stats["examples"] >= 4
