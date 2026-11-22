@@ -58,10 +58,10 @@ def test_cost_accounting(tmp_path: Path):
     assert c["tokens"] == {"prompt": 4000, "completion": 400, "cached": 1600, "calls": 4, "failed_calls": 0}
 
 
-def test_cost_counts_moonshot_cached_tokens(tmp_path: Path):
+def test_cost_counts_top_level_cached_tokens(tmp_path: Path):
     rd = tmp_path / "m"
     rd.mkdir()
-    usage = {"prompt_tokens": 1000, "completion_tokens": 100, "cached_tokens": 400}  # Moonshot puts it top-level
+    usage = {"prompt_tokens": 1000, "completion_tokens": 100, "cached_tokens": 400}  # some servers put it top-level
     lines = [{"response": {"body": {"usage": usage}}}, {"error": {"code": "timeout", "message": "t"}}]
     (rd / "responses.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
     c = run_cost(rd, Prices(input=2.0, output=10.0, cached_input=0.2))

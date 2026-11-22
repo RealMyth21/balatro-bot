@@ -11,7 +11,7 @@ Target: **Black Deck, Gold Stake**, Balatro 1.0.1o. Primary metric: win rate (be
 ## Where games run
 | Player | Backend | Why |
 |---|---|---|
-| LLM (Kimi via BalatroLLM) | exact engine (`scripts/serve.py --backend engine`) | real description text in prompts; speed irrelevant (latency-bound) |
+| LLM (open-weights model on the RTX 4090 via vLLM, played by BalatroLLM) | exact engine where Balatro is installed; otherwise jackdaw | the engine gives real description text in prompts; jackdaw gives names only |
 | Analysis tools for the LLM | jackdaw shadow in lockstep | exact score ranges and clear odds |
 | Fast policies (smart, search, PPO) | jackdaw | 1000s of games per hour |
 | Spot checks | real game via balatrobot | ground truth; slow and occasionally hangs |
@@ -19,7 +19,7 @@ Target: **Black Deck, Gold Stake**, Balatro 1.0.1o. Primary metric: win rate (be
 ## Metrics (`balatro_bot/eval/report.py`)
 - **Win rate**, with a Wilson 95% interval. Wilson stays meaningful near 0% and at small n.
 - **Ante reached**, as a mean and a distribution. At low win rates it's the more sensitive metric.
-- **Cost per game** in USD, from logged token usage × provider prices.
+- **Tokens and time per game**, from the logs (cost only if a paid server is used).
 - **Paired comparisons:**
   - win-rate difference with an exact McNemar test on the shared seeds;
   - mean-ante difference with a bootstrap 95% interval.
@@ -33,8 +33,8 @@ How precise a win rate is (95% interval half-width, at a true rate of 5%):
 | 1000 | ~1.4 pts |
 
 ## Arms
-1. `kimi-notools`: BalatroLLM's default strategy, game actions only.
-2. `kimi-tools`: the same, plus `score_plays` and `estimate_clear_chance` while playing a hand and
+1. `<model>-notools`: BalatroLLM's default strategy, game actions only.
+2. `<model>-tools`: the same, plus `score_plays` and `estimate_clear_chance` while playing a hand and
    `evaluate_options` in shops and packs (`balatro_bot/agent/tools.py`).
 
 `evaluate_options` plays each option's imagined futures to the end of the run with a default player
@@ -45,10 +45,10 @@ of the measurement.
 3. Baselines: jackdaw `smart`, `search` (`balatro_bot/search`), `random`.
 
 ## Procedure
-1. Run the mock pipeline end to end: `scripts/run_llm.py --mock` (no key, no cost).
-2. Pilot: 10 dev seeds per arm with `--max-cost` set. From the pilot, read tokens, latency and cost
-   per game, plus any request parameters Moonshot rejects.
-3. Scale on dev. Pick n from the table above and the measured cost per game.
+1. Run the mock pipeline end to end: `scripts/run_llm.py --mock` (no GPU).
+2. Pilot on the RTX 4090: 10 dev seeds per arm (`scripts/gpu/run_on_gpu.sh`, `N=10`). From the pilot,
+   read seconds and tokens per decision, games per hour, and how often the model's tool calls are valid.
+3. Scale on dev. Pick n from the table above and the measured games per hour.
 4. Final: heldout seeds, once per arm, with the configuration frozen beforehand.
 
 ## Leakage rules (seeded games know the future)

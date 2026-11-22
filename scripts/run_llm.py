@@ -1,17 +1,19 @@
 """Play Black Deck / Gold Stake games with an LLM through BalatroLLM, many in parallel.
 
-  # dry run of the whole pipeline with a local mock model (no API key, no cost):
+  # dry run of the whole pipeline with a mock model (no GPU):
   uv run python scripts/run_llm.py --mock --n 4 --parallel 4
 
-  # Kimi K3.1 Pro pilot (needs MOONSHOT_API_KEY in your shell), with a hard budget cap:
-  uv run python scripts/run_llm.py --label kimi-notools --n 10 --parallel 4 --max-cost 25
-  uv run python scripts/run_llm.py --label kimi-tools --tools --n 10 --parallel 4 --max-cost 40
+  # an open-weights model served on the local GPU by vLLM (scripts/gpu/run_on_gpu.sh does all of this):
+  uv run python scripts/run_llm.py --model Qwen/Qwen2.5-7B-Instruct --n 10 --parallel 4
+  uv run python scripts/run_llm.py --model Qwen/Qwen2.5-7B-Instruct --tools --n 10 --parallel 4
 
-Games run on our exact engine by default (real description text for the prompt); --backend jackdaw
-uses the simulator (text fields are names only). Per-game summaries go to runtime/eval/llm.jsonl and
-full BalatroLLM logs to runtime/llm_runs/. Rerunning skips seeds already finished under the same label,
-deck, stake and model, and retries seeds that stopped on an infrastructure error (API outage, dead
-server, budget stop); those are left out of the results until they finish.
+The model is any OpenAI-compatible server; by default a local one (vLLM) at http://127.0.0.1:8000/v1,
+which needs no key. Games run on our exact engine by default (real description text for the prompt;
+needs a Balatro install); --backend jackdaw uses the simulator (text fields are names only).
+Per-game summaries go to runtime/eval/llm.jsonl and full BalatroLLM logs to runtime/llm_runs/.
+Rerunning skips seeds already finished under the same label, deck, stake and model, and retries seeds
+that stopped on an infrastructure error (model server down, dead game server, budget stop); those are
+left out of the results until they finish.
 """
 
 from __future__ import annotations
@@ -29,15 +31,16 @@ from balatro_bot.eval.report import format_paired, format_summary, load, paired,
 from balatro_bot.eval.seeds import seeds  # noqa: E402
 from balatro_bot.serve_pool import ServerPool  # noqa: E402
 
-MOONSHOT_URL = "https://api.moonshot.ai/v1"
+LOCAL_URL = "http://127.0.0.1:8000/v1"  # vLLM's default
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--label", default=None, help="name for this configuration in the results")
-    ap.add_argument("--model", default="kimi-k3.1-pro")
-    ap.add_argument("--base-url", default=MOONSHOT_URL)
-    ap.add_argument("--api-key-env", default="MOONSHOT_API_KEY", help="environment variable holding the key")
+    ap.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct", help="model name the server serves")
+    ap.add_argument("--base-url", default=LOCAL_URL, help="OpenAI-compatible server (default: local vLLM)")
+    ap.add_argument("--api-key-env", default="LOCAL_LLM_KEY",
+                    help="environment variable holding a key, if the server needs one (a local one doesn't)")
     ap.add_argument("--tools", action="store_true",
                     help="enable the analysis tools (exact scores, clear odds, shop/pack option evaluation)")
     ap.add_argument("--option-worlds", type=int, default=12, help="evaluate_options: imagined futures per option")
@@ -56,9 +59,9 @@ def main() -> None:
     ap.add_argument("--model-config", default="{}", help='JSON merged into BalatroLLM\'s request params')
     ap.add_argument("--max-cost", type=float, default=float("inf"),
                     help="USD cap for this label/deck/stake/model, earlier runs included; checked before every call")
-    ap.add_argument("--price-in", type=float, default=2.0, help="USD per 1M input tokens")
-    ap.add_argument("--price-out", type=float, default=10.0, help="USD per 1M output tokens")
-    ap.add_argument("--price-cached", type=float, default=0.2, help="USD per 1M cached input tokens")
+    ap.add_argument("--price-in", type=float, default=0.0, help="USD per 1M input tokens (0: local model)")
+    ap.add_argument("--price-out", type=float, default=0.0, help="USD per 1M output tokens")
+    ap.add_argument("--price-cached", type=float, default=0.0, help="USD per 1M cached input tokens")
     ap.add_argument("--max-steps", type=int, default=2000)
     ap.add_argument("--keep-cache-control", action="store_true", help="send OpenRouter/Anthropic cache hints")
     ap.add_argument("--drop-param", action="append", default=[],
@@ -85,8 +88,11 @@ def main() -> None:
         base_url, api_key = f"http://127.0.0.1:{mock_httpd.server_address[1]}/v1", "mock"
     else:
         base_url, api_key = args.base_url, os.environ.get(args.api_key_env, "")
+        local = base_url.startswith(("http://127.0.0.1", "http://localhost"))
         if not api_key:
-            sys.exit(f"set {args.api_key_env} in your shell (the key is read from the environment only)")
+            if not local:
+                sys.exit(f"set {args.api_key_env} in your shell (the key is read from the environment only)")
+            api_key = "local"  # a local server ignores it; the client needs some value
 
     evaluator = None
     if args.tools:  # the tools run on jackdaw (sim extra)

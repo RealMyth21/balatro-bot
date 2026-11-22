@@ -34,7 +34,7 @@ def test_parallel_games_with_tools_logs_and_export(tmp_path: Path):
     assert out["played"] == 2
     rows = [json.loads(line) for line in summary.read_text().splitlines()]
     assert {r["seed"] for r in rows} == {"EYEQG8GT", "NCWEFXTT"}
-    assert all(r["error"] is None and r["cost_usd"] > 0 for r in rows)
+    assert all(r["error"] is None and r["tokens"]["calls"] > 0 and r["cost_usd"] == 0 for r in rows)  # local: free
     outcomes = [json.loads(line)["outcome"] for p in (tmp_path / "runs").rglob("outcomes.jsonl")
                 for line in p.read_text().splitlines()]
     assert "local_tool" in outcomes and "successful" in outcomes
@@ -112,8 +112,8 @@ def test_model_mismatch_is_an_infrastructure_error(tmp_path: Path):
 
 
 def test_same_model():
-    assert same_model("kimi-k3.1-pro", "kimi-k3.1-pro")
-    assert same_model("kimi-k3.1-pro", "moonshotai/kimi-k3.1-pro")
-    assert same_model("kimi-k3.1-pro", "kimi-k3.1-pro-2026-11-01")
-    for served in ("kimi-k3", "kimi", "", "kimi-k3.1-pro-mini", "kimi-k3.1"):
-        assert not same_model("kimi-k3.1-pro", served), served
+    assert same_model("qwen3-8b", "qwen3-8b")
+    assert same_model("qwen3-8b", "Qwen/qwen3-8b")
+    assert same_model("qwen3-8b", "qwen3-8b-2026-11-01")
+    for served in ("qwen3", "qwen", "", "qwen3-8b-mini", "qwen3-4b"):
+        assert not same_model("qwen3-8b", served), served

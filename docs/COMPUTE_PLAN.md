@@ -1,63 +1,61 @@
 # Compute plan
 
-What each stage needs, with estimates to replace with pilot measurements. Prices are third-party
-reports for Kimi K3.1 Pro (Nov 2026): $2 per 1M input tokens, $10 per 1M output, $0.20 per 1M cached
-input. Check Moonshot's page first.
+Everything runs on **one NVIDIA RTX 4090 (24 GB)** and the CPU of the machine it's in. No paid APIs:
+every model is an open-weights model served on that GPU. Numbers below are estimates until the first
+GPU run measures them.
 
-## Needs at a glance
-| Stage | Needs | Status |
+## What runs where
+| Stage | Runs on | Status |
 |---|---|---|
-| Engine, jackdaw, validation, baselines, search bot | laptop CPU | done |
-| LLM pipeline (mock, with and without tools) | laptop | done: 4 parallel games end to end, logs, export |
-| RL pipeline (jackdaw's MaskablePPO example) | laptop CPU | done: smoke test on Black/Gold, ~140k steps/min on 2+2 threads |
-| Kimi pilot and baseline | Moonshot API key + budget | waiting on key |
-| Distillation data | API budget (or the search bot as a free teacher for play/discard) | after pilot |
-| Fine-tuning (SFT/LoRA) | GPU | waiting on GPU |
-| RL on the student model | GPU for generation; jackdaw on CPU for the game | later |
+| Engine, jackdaw, validation, baselines, search bot | CPU | done |
+| LLM pipeline (mock, with and without tools), game records, viewer | CPU | done |
+| LLM baseline with an open model | GPU (vLLM) + CPU (games, tools) | ready: `scripts/gpu/run_on_gpu.sh`, untested on the GPU |
+| Judgment score (position value network) | CPU (game data) + GPU (training) | next |
+| Search + PPO bot (non-LLM) | CPU (jackdaw envs) + GPU (network) | after the judgment score |
+| LLM fine-tuning (SFT / DPO, later per-decision GRPO) | GPU (LoRA) | after the baseline |
 
-## Kimi cost per game (estimate; the pilot replaces this)
-- **Decisions per game.** BalatroLLM asks the model about hands, shops and packs; blind select and
-  cash-out are automatic. At Gold Stake most games end at ante 1–3, around 30–100 decisions. A full
-  8-ante win is around 200–250.
-- **Tokens per decision (measured).** BalatroLLM's default prompt is about 12.8k input tokens
-  (chars/4 estimate from the mock run):
-  - about 10.5k (84%) is strategy text, identical on every call, so a provider's prefix cache can
-    serve it;
-  - about 1.2k is game state;
-  - about 0.7k is tool schemas.
+The CPU matters as much as the GPU: the simulator, the search player and the analysis tools all run on
+CPU cores. More cores means more games in parallel.
 
-  Output is about 1–3k tokens, mostly reasoning (estimate).
-- **Cost per decision.** About $0.006 input if the strategy text is cached (about $0.026 if not), plus
-  about $0.01–0.03 output, so roughly $0.016–0.056. The pilot must check whether Moonshot caches.
-- **Cost per game:**
-  - **no tools**: about $1–4 for a typical loss, $4–10 for a full-length game;
-  - **with tools**: roughly 1.5–2× that, since each tool call is another request carrying the full
-    context.
-- **Pilot budget.** 10 games per arm is roughly $20–80 in total.
+## Which LLMs fit
+- **7–8B models at full precision** (about 16 GB of weights, the rest for the context cache): the
+  default is `Qwen/Qwen2.5-7B-Instruct` (vLLM tool parser `hermes`); Qwen3-8B is the next to try.
+- **~14B models compressed to 4 bits** (AWQ/GPTQ) also fit, with less room for parallel games.
+- Larger models don't fit on one 24 GB GPU.
+- Small models will be weak at Black Deck / Gold Stake; they're the starting point for fine-tuning,
+  not expected to win on their own.
 
-**Precision vs cost:** at ~$3 per game, 400 games per arm (±2 pts on win rate) costs about $1.2k per
-arm. Use mean ante as the primary signal while win rates are near 0.
+## LLM baseline
+- **Prompt:** BalatroLLM's prompt is about 12.8k tokens per decision, ~84% of it the same strategy
+  text every time, which vLLM's prefix cache reuses. Games are configured for a 32k context.
+- **Decisions per game:** ~30–100 for a typical Gold Stake loss, ~200–250 for a full 8-ante game.
+- **Throughput (estimate):** roughly 1,000–2,500 games in 12 hours with a 7–8B model and 4–8 games in
+  parallel. The pilot measures the real number.
+- **Description text:** on a machine without Balatro, games run on jackdaw, whose game state has card
+  and joker names but not their effect text. That makes the task harder for a small model. Options:
+  run on a machine with Balatro installed (the exact engine gives the real text), or add effect text
+  generated locally from your own copy of the game (it can't be committed to the repo).
 
-## Distillation data
-- Target: 50k–200k decisions for a first SFT run. That's about 500–2,000 Kimi games, or $2k–8k.
-- **Cheaper mix:** label play/discard decisions with the search bot (free, CPU). Spend Kimi tokens
-  only on shop, pack and joker decisions, where the search bot has no edge.
-- Export: `scripts/export_sft.py`, filtered by final ante or wins and weighted by ante.
+## Teachers for fine-tuning (no API model)
+- **Play and discard decisions:** labeled by the search player (free, CPU).
+- **Shop, pack and skip decisions:** labeled by search guided by the judgment score, once it exists.
+- **Reasoning text:** comes from the model itself; keep its attempts whose actions match what the
+  teachers chose or that led to good outcomes.
+- Export with `scripts/export_sft.py`; games are filtered by ante reached and wins.
 
-## GPU (rough)
-- **Student model:** an 8B-class open instruct model with tool calling first; 32B if 8B plateaus.
-- **SFT tokens:** 100k decisions × ~5k tokens is about 500M tokens per epoch.
-- **LoRA SFT on 8B:**
-  - 1× H100 80GB at ~3k tokens/s is about 45 h per epoch;
-  - 8× H100 is about 6 h.
-- **32B:** roughly 4× the GPU-hours.
-- **Suggested start:**
-  - 1–2× A100/H100 80GB for LoRA on 8B with a 20–50k-decision subset (about 10–25 GPU-h);
-  - then scale with what the first fine-tune shows.
+## Fine-tuning on one 24 GB GPU (rough)
+- **LoRA SFT on a 7–8B model:** fits comfortably; QLoRA (4-bit base) for ~14B.
+- **Data size:** start with 20k–50k decisions. At ~5k tokens each that's 100M–250M tokens per epoch,
+  on the order of a day or two of training on a 4090 (to be measured).
+- **DPO** on "better vs worse action in the same spot" pairs: similar cost to SFT.
+- **Per-decision GRPO:** possible with a 7–8B model and LoRA, but generation and training share the
+  24 GB, so groups stay small and runs take days.
 
-## Order of operations once resources arrive
-1. `scripts/run_llm.py --mock` (already passing) as a final check, then set `MOONSHOT_API_KEY`.
-2. Kimi pilot, 10 dev seeds × 2 arms, `--max-cost` set; fill in real cost per game here.
-3. Baseline on dev (n from cost and EVAL_PROTOCOL.md), then heldout.
-4. Generate distillation data (Kimi plus search-bot labels), export, LoRA SFT on GPU, evaluate the
-   student on the same seeds.
+## Order of operations
+1. Dry run: `MOCK=1 bash scripts/gpu/run_on_gpu.sh` (no GPU), already passing.
+2. GPU pilot: `N=10 bash scripts/gpu/run_on_gpu.sh`. Measure games per hour, tokens and seconds per
+   decision, and how often tool calls are valid.
+3. Baseline on dev seeds, both arms, with n chosen from the measured games per hour; held-out seeds once
+   the setup is frozen.
+4. Judgment score, then the search + PPO bot.
+5. Fine-tune the LLM on teacher labels (SFT, then DPO), evaluate on the same seeds; GRPO if it helps.

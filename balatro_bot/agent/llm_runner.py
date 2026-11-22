@@ -6,7 +6,7 @@ Added here (BalatroLLM can't do these out of the box):
   - connects to already-running servers (our exact engine or `jackdaw serve`) instead of launching
     Balatro; one game per server, a port pool for parallel games
   - optional local analysis tools (agent/tools.py) answered in a multi-turn loop inside a decision
-  - a model-id check (Moonshot falls back to an older model on a mistyped id), a step cap
+  - a model-id check (some providers serve a different model for a mistyped or retired id), a step cap
   - per-decision outcomes (outcomes.jsonl) for the fine-tuning exporter
   - cost from token usage at your provider's prices, and a budget cap checked before every LLM call
   - errors sorted into the policy's own failures (a loss) and infrastructure errors (left out of the
@@ -35,19 +35,19 @@ from balatro_bot.eval.report import error_kind
 
 
 def cached_tokens(usage: dict) -> int:
-    """Cached prompt tokens: OpenAI-style `prompt_tokens_details.cached_tokens` or Moonshot's
-    top-level `cached_tokens`."""
+    """Cached prompt tokens: OpenAI-style `prompt_tokens_details.cached_tokens`, or a top-level
+    `cached_tokens` as some OpenAI-compatible servers report it."""
     return ((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or usage.get("cached_tokens") or 0)
 
 
 @dataclass
 class Prices:
-    """USD per million tokens. Defaults: Kimi K3.1 Pro as reported by third parties (Nov 2026);
-    check Moonshot's pricing page before relying on them."""
+    """USD per million tokens. Defaults are 0: models run on our own GPU. Set them for a paid server
+    to get costs and a working budget cap."""
 
-    input: float = 2.0
-    output: float = 10.0
-    cached_input: float = 0.2
+    input: float = 0.0
+    output: float = 0.0
+    cached_input: float = 0.0
 
     def cost(self, usage: dict) -> float:
         prompt = usage.get("prompt_tokens") or 0
@@ -81,7 +81,7 @@ def run_cost(run_dir: Path, prices: Prices) -> dict:
 
 def same_model(asked: str, served: str) -> bool:
     """Whether the provider served the model asked for: the same id, possibly with a provider prefix
-    ("moonshotai/...") or a dated snapshot suffix ("...-2026-11-01"). Anything else (an older model a
+    ("Qwen/...") or a dated snapshot suffix ("...-2026-11-01"). Anything else (an older model a
     provider substitutes for a mistyped or retired id, or no id at all) is a mismatch."""
     if not served:
         return False

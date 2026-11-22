@@ -1,6 +1,6 @@
 """Export logged LLM games as a chat-format fine-tuning dataset (JSONL).
 
-  uv run python scripts/export_sft.py --runs runtime/llm_runs --out runtime/sft/kimi.jsonl --min-ante 3
+  uv run python scripts/export_sft.py --runs runtime/llm_runs --out runtime/sft/qwen.jsonl --min-ante 3
   uv run python scripts/export_sft.py --won-only --no-reasoning
 
 Each line: {"messages": [...prompt..., assistant tool call], "tools": [...], "metadata": {...}}.

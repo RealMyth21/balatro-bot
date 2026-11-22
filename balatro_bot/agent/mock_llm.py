@@ -1,4 +1,4 @@
-"""A stand-in for an OpenAI-compatible chat API (e.g. Moonshot), for testing the LLM pipeline without
+"""A stand-in for an OpenAI-compatible chat API (e.g. vLLM serving a local model), for testing the LLM pipeline without
 an API key: prompts, tool calls, logging, parallel games, retries and cost accounting.
 
 It answers every chat completion with a valid tool call chosen from the tools offered in the request

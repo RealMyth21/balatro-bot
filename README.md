@@ -23,10 +23,10 @@ Tools for building and evaluating Balatro bots, with a focus on **exactness**:
   [BalatroLLM](https://github.com/coder/balatrollm) against those servers in parallel, with:
   - optional analysis tools for the model: exact score ranges and the chance to clear the blind while
     playing a hand, and in shops and packs how far the run gets after each option (`evaluate_options`);
-  - a check that the provider served the requested model;
-  - cost accounting and a budget cap checked before every call;
+  - a check that the server served the requested model;
+  - token accounting (and costs with a budget cap, if a paid server is ever used);
   - infrastructure failures (outages, dead servers) kept out of the results and retried;
-  - a mock model for testing without an API key.
+  - a mock model for testing without a GPU.
 - **Fine-tuning data** (`scripts/export_sft.py`): logged LLM games become chat-format training examples.
 - **Game records and a replay viewer** (`viewer/index.html`): every LLM game writes a record of every
   step, the model's reasoning and each analysis tool's full answer; `scripts/record_game.py` records
@@ -105,7 +105,8 @@ Both accept balatrobot v1.5.2 requests (`start`, `select`, `skip`, `play`, `disc
 uv run python scripts/eval_fast.py --policy smart search --n 400 --workers 6        # baselines
 uv run python scripts/serve.py --backend engine --n 8                               # 8 game servers
 uv run python scripts/run_llm.py --mock --n 4 --parallel 4                          # LLM pipeline, mock model
-uv run python scripts/run_llm.py --label kimi --n 10 --parallel 4 --max-cost 25     # needs MOONSHOT_API_KEY
+uv run python scripts/run_llm.py --model Qwen/Qwen2.5-7B-Instruct --n 10            # model served on the local GPU (vLLM)
+bash scripts/gpu/run_on_gpu.sh                                                     # all of it on an NVIDIA GPU (docs/GPU_RUN.md)
 uv run python scripts/export_sft.py --min-ante 3                                    # fine-tuning dataset
 uv run python scripts/rl_ppo.py fetch                                               # jackdaw's PPO examples
 uv run python scripts/rl_ppo.py train --deck BLACK --stake GOLD -- --timesteps 2000000
