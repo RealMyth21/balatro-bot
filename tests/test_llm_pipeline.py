@@ -47,6 +47,8 @@ def test_parallel_games_with_tools_logs_and_export(tmp_path: Path):
         lines = [json.loads(line) for line in Path(r["record"]).read_text().splitlines()]
         assert lines[0]["type"] == "header" and lines[0]["player"]["model"] == "mock-model"
         assert lines[-1]["type"] == "end" and lines[-1]["ante"] == r["ante"]
+        # jackdaw games: the shadow is the same engine, so every play checks out and analysis stays online
+        assert r["analysis"]["online"] and r["analysis"]["plays_checked"] >= 1
         llm = [x for x in lines if x.get("actor") == "llm"]
         assert llm and all(x["decision"]["model_calls"] >= 1 for x in llm)
         calls = [t for x in llm for t in x["decision"]["tool_calls"]]

@@ -90,11 +90,13 @@ class GameRecorder:
                      **{k: _jsonable(v) for k, v in extra.items() if v is not None}})
         self._i += 1
 
-    def note(self, text: str, decision: Decision | dict | None = None) -> None:
+    def note(self, text: str, decision: Decision | dict | None = None, kind: str = "invalid_answer") -> None:
+        """Something that happened after the latest step: an invalid model answer (with the model's
+        reply), or the analysis going offline because jackdaw disagreed with the game."""
         if isinstance(decision, Decision):
             decision = decision.as_dict()
         self._write({"type": "note", "after_step": self._i - 1, "t": round(time.time() - self._t0, 3),
-                     "text": text, "decision": decision})
+                     "kind": kind, "text": text, "decision": decision})
 
     def end(self, **summary: Any) -> None:
         if self._ended:

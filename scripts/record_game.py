@@ -23,6 +23,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from balatro_bot.agent.recorder import GameRecorder, versions  # noqa: E402
 from balatro_bot.agent.scoring_trace import trace_play  # noqa: E402
+from balatro_bot.engine.request_states import accepted  # noqa: E402
+from balatro_bot.validation.diff import first_diff, rules_view  # noqa: E402
+
+# Not compared: the round summary (only cash_out happens there) and the end of the game. After Amber
+# Acorn is beaten the game keeps the jokers face down on the round summary, while jackdaw turns them
+# face up at once; the next comparison, in the shop, shows whether that ever matters.
+UNCHECKED_STATES = ("ROUND_EVAL", "GAME_OVER")
+
+
+class Drift(Exception):
+    """jackdaw's copy disagreed with the real game; `view` is the real game's response."""
+
+    def __init__(self, message: str, view: dict):
+        super().__init__(message)
+        self.view = view
 from balatro_bot.eval.seeds import seeds  # noqa: E402
 
 
@@ -49,8 +64,19 @@ def record(seed: str, policy: str, backend: str, deck: str, stake: str, out: Pat
     rand = RandomPolicy() if policy == "random" else None
 
     def send(method, params):
+        """Send to the decision-maker's jackdaw copy and the backend. With the engine, the copy is
+        compared with the real game after every request: if they disagree (a jackdaw rule bug), the
+        game stops with that difference as its error rather than play on from a wrong state."""
         b = jd.handle(method, params)
-        return eng.call(method, params) if eng else b
+        if not eng:
+            return b
+        real = eng.call(method, params)
+        if real.get("state") in UNCHECKED_STATES or real.get("won"):
+            return real  # nothing is decided here; the next request's comparison catches real drift
+        diff = first_diff(rules_view(real), rules_view(b), labels=("game", "jackdaw"))
+        if diff:
+            raise Drift(f"jackdaw drifted from the game after {method}: {diff}"[:500], real)
+        return real
 
     t0 = time.perf_counter()
     rec = GameRecorder(out, seed=seed, deck=deck, stake=stake, backend=backend,
@@ -82,12 +108,21 @@ def record(seed: str, policy: str, backend: str, deck: str, stake: str, out: Pat
                 continue
             g = jd.game
             t = time.perf_counter()
+            # only actions the real game accepts in this state (jackdaw allows more, e.g. using a card
+            # on the round summary)
+            def ok(x, state=view["state"]) -> bool:
+                r = jd.request_for(x)
+                return r is not None and accepted(r[0], state)
+
+            legal = [x for x in g.legal_actions() if ok(x)]
             if search:
                 action = search.act(g)
+                if not ok(action):
+                    action = smart_agent(g, legal)
             elif rand:
-                action = rand.choose(g, g.legal_actions(), rng, jd.view())
+                action = rand.choose(g, legal, rng, jd.view())
             else:
-                action = smart_agent(g, g.legal_actions())
+                action = smart_agent(g, legal)
             decision = {"policy": policy, "seconds": round(time.perf_counter() - t, 3), "tool_calls": [],
                         "reasoning": []}
             if search and search.last_eval:
@@ -100,8 +135,19 @@ def record(seed: str, policy: str, backend: str, deck: str, stake: str, out: Pat
                 break
             method, params = req
             scoring = trace_play(g, (params or {}).get("cards") or []) if method == "play" else None
+            chips_before = (view.get("round") or {}).get("chips")
             t = time.perf_counter()
-            view = send(method, params or None)
+            try:
+                view = send(method, params or None)
+            except Drift as d:  # record the step as the real game played it, then stop
+                rec.step(method, params or {}, result=d.view, actor="policy", decision=decision,
+                         seconds=time.perf_counter() - t, scoring=scoring)
+                rec.note(str(d), kind="drift")
+                raise
+            chips_after = (view.get("round") or {}).get("chips")
+            if scoring is not None and chips_before is not None and chips_after is not None \
+                    and abs(scoring["total"] - (chips_after - chips_before)) > 1e-6 * max(1.0, abs(chips_after)):
+                scoring = {**scoring, "matches_game": False, "game_total": chips_after - chips_before}
             rec.step(method, params or {}, result=view, actor="policy", decision=decision,
                      seconds=time.perf_counter() - t, scoring=scoring)
         summary = {"won": bool(view.get("won")), "ante": view.get("ante_num"), "round": view.get("round_num"),

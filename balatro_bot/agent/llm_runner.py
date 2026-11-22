@@ -31,7 +31,15 @@ from typing import Any
 
 from balatro_bot.agent.recorder import READ_ONLY, Decision, GameRecorder, versions
 from balatro_bot.agent.scoring_trace import trace_play
-from balatro_bot.agent.tools import TOOL_NAMES, Shadow, parse_tools, run_tool, tools_for_state, viewer_analysis
+from balatro_bot.agent.tools import (
+    TOOL_NAMES,
+    Shadow,
+    analysis_snapshot,
+    parse_tools,
+    run_tool,
+    tools_for_state,
+    viewer_analysis,
+)
 from balatro_bot.eval.report import error_kind
 
 
@@ -79,6 +87,11 @@ def run_cost(run_dir: Path, prices: Prices) -> dict:
             cost += prices.cost(usage)
     return {"tokens": tok, "cost_usd": round(cost, 6)}
 
+
+def _round_chips(result) -> float | None:
+    """The chips scored so far this round in a game response, if it has them."""
+    chips = ((result or {}).get("round") or {}).get("chips") if isinstance(result, dict) else None
+    return float(chips) if isinstance(chips, (int, float)) else None
 
 def reasoning_of(msg) -> str | None:
     """The model's thinking from a chat message: vLLM's reasoning parser puts it in `reasoning_content`
@@ -137,6 +150,7 @@ def _make_bot_class():
 
         def __init__(self, inner, bot, shadow: Shadow | None):
             self._inner, self._bot, self._shadow = inner, bot, shadow
+            self._chips = None  # the real game's chips this round, from the latest response
 
         async def call(self, method: str, params: dict | None = None):
             scoring = None
@@ -145,6 +159,7 @@ def _make_bot_class():
                     scoring = trace_play(self._shadow.sim.game, list((params or {}).get("cards") or []))
                 except Exception:  # noqa: BLE001  malformed cards: the game will refuse the play anyway
                     scoring = None
+            chips_before, was_ok = self._chips, self._shadow is not None and self._shadow.ok
             t0 = time.perf_counter()
             try:
                 result = await self._inner.call(method, params)
@@ -156,10 +171,20 @@ def _make_bot_class():
                                                               "message": getattr(e, "message", str(e))},
                                        seconds=time.perf_counter() - t0)
                 raise
+            chips_after = _round_chips(result)
+            if scoring is not None and chips_before is not None and chips_after is not None:
+                real = chips_after - chips_before  # what the real game scored for this play
+                if not self._shadow.verify_play(scoring["total"], real, (params or {}).get("cards") or []):
+                    scoring = {**scoring, "matches_game": False, "game_total": real}
+            if chips_after is not None:
+                self._chips = chips_after
             if self._shadow is not None:
                 self._shadow.apply(method, params)
             self._bot._record_step(method, params, result=result, seconds=time.perf_counter() - t0,
                                    scoring=scoring)
+            if was_ok and not self._shadow.ok and self._bot.recorder is not None:
+                self._bot.recorder.note(f"analysis offline for the rest of the game: {self._shadow.reason}",
+                                        kind="analysis_offline")
             return result
 
         async def __aenter__(self):
@@ -339,15 +364,26 @@ def _make_bot_class():
             self._decision = Decision(extra={"state_seen": gamestate.get("state")})
             if self._shadow is not None and gamestate.get("state") == "SELECTING_HAND":
                 # every tool's answer, for the record only (the model sees just the tools it called)
-                try:
-                    analysis = await asyncio.to_thread(viewer_analysis, self._shadow, gamestate)
-                except Exception as e:  # noqa: BLE001  never let the record's extras stop a game
-                    analysis = {"error": f"{type(e).__name__}: {e}"}
-                if analysis:
-                    self._decision.extra["analysis"] = analysis
+                was_ok = self._shadow.ok
+                snapshot = analysis_snapshot(self._shadow, gamestate)  # checks the shadow, copies the game
+                if was_ok and not self._shadow.ok and self.recorder is not None:
+                    self.recorder.note(f"analysis offline for the rest of the game: {self._shadow.reason}",
+                                       kind="analysis_offline")
+                # runs on its own copy while the model thinks; finished before the action is applied
+                analysis_task = asyncio.ensure_future(asyncio.to_thread(viewer_analysis, snapshot))
+            else:
+                analysis_task = None
+            decision = self._decision
             try:
                 return await self._decide(gamestate)
             finally:
+                if analysis_task is not None:
+                    try:
+                        analysis = await analysis_task
+                    except Exception as e:  # noqa: BLE001  never let the record's extras stop a game
+                        analysis = {"error": f"{type(e).__name__}: {e}"}
+                    if analysis:
+                        decision.extra["analysis"] = analysis
                 if self._decision is not None:
                     self._decision.seconds = time.perf_counter() - t0
 
@@ -391,6 +427,7 @@ def _make_bot_class():
                 messages = messages + [assistant, *answers]
             return response
 
+    AgentBot.RecordingClient = RecordingClient  # for tests
     return AgentBot
 
 
@@ -499,6 +536,7 @@ async def run_games(*, ports: list[int], seeds: list[str], model: str, base_url:
                 bot.recorder.end(won=bool(getattr(stats, "run_won", False)), ante=getattr(stats, "final_ante", None),
                                  round=getattr(stats, "final_round", None), error=error,
                                  error_kind=error_kind({"error": error}), cost_usd=bot.game_spent,
+                                 analysis=bot._shadow.summary() if bot._shadow is not None else None,
                                  seconds=round(time.perf_counter() - t0, 1))
             row = {"seed": seed, "policy": label, "deck": deck, "stake": stake,
                    "won": bool(getattr(stats, "run_won", False)), "ante": getattr(stats, "final_ante", None),
@@ -506,6 +544,7 @@ async def run_games(*, ports: list[int], seeds: list[str], model: str, base_url:
                    "tokens": cost["tokens"], "seconds": round(time.perf_counter() - t0, 1), "error": error,
                    "error_kind": error_kind({"error": error}),
                    "run_dir": str(run_dir) if run_dir else None, "model": model, "tools": tools,
+                   "analysis": bot._shadow.summary() if bot._shadow is not None else None,
                    "record": str(bot.recorder.path) if bot.recorder else None}
             if row["error_kind"] != "infra":
                 finished_costs.append(cost["cost_usd"])

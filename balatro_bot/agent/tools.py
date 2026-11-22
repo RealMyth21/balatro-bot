@@ -122,6 +122,22 @@ class Shadow:
         self.sim = SimBackend()
         self.ok = True
         self.reason = ""
+        self.plays_checked = 0  # plays whose predicted score was compared with the real game's
+        self.plays_mismatched = 0
+
+    def verify_play(self, predicted: float, real: float, cards) -> bool:
+        """After a play the real game accepted: did the shadow score it the same? A mismatch means
+        jackdaw has a rule wrong here, so the analysis stops for the rest of the game."""
+        self.plays_checked += 1
+        if abs(float(predicted) - float(real)) <= 1e-6 * max(1.0, abs(float(real))):
+            return True
+        self.plays_mismatched += 1
+        return self._fail(f"shadow scored play {list(cards)} as {predicted:g}, the game as {real:g}")
+
+    def summary(self) -> dict:
+        """For the game's result row: whether the analysis stayed online, and the plays checked."""
+        return {"online": self.ok, "reason": self.reason or None, "plays_checked": self.plays_checked,
+                "plays_mismatched": self.plays_mismatched}
 
     def apply(self, method: str, params: dict | None) -> None:
         """Mirror a request the real game has just accepted."""
@@ -304,16 +320,28 @@ def estimate_clear_chance(game, candidates: list[dict] | None = None, worlds: in
     return {**_blind_info(game), "worlds": worlds, "results": results}
 
 
-def viewer_analysis(shadow: Shadow, view: dict) -> dict | None:
-    """The detailed analysis of a hand decision for the game record (viewer and training data), never
-    shown to the model: every tool's answer, the clear-chance search included."""
+def analysis_snapshot(shadow: Shadow, view: dict):
+    """A private copy of the shadow's game for the record's analysis, after checking the shadow against
+    the real game: the analysis can then run alongside the model's own tool calls without sharing state.
+    None when not choosing a play or discard; a dict with an error when the shadow is offline."""
     if view.get("state") not in HAND_STATES:
         return None
-    out = {}
-    for name, args in (("score_plays", {"top": 10}), ("estimate_clear_chance", {}), ("optimize_jokers", {}),
-                       ("optimize_hand", {})):
-        out[name] = json.loads(run_tool(shadow, view, name, args, detail=True))
-    return out
+    if not shadow.check(view):
+        return {"error": f"analysis unavailable: {shadow.reason}"}
+    from jackdaw.core import Game
+
+    return Game(shadow.sim.game._g.clone())
+
+
+def viewer_analysis(snapshot) -> dict | None:
+    """The detailed analysis of a hand decision for the game record (viewer and training data), never
+    shown to the model: every tool's full answer, the clear-chance search included. `snapshot` comes
+    from analysis_snapshot."""
+    if snapshot is None or isinstance(snapshot, dict):
+        return snapshot
+    return {name: json.loads(_answer(snapshot, name, args, detail=True))
+            for name, args in (("score_plays", {"top": 10}), ("estimate_clear_chance", {}),
+                               ("optimize_jokers", {}), ("optimize_hand", {}))}
 
 
 def run_tool(shadow: Shadow, view: dict, name: str, arguments: str | dict, detail: bool = False) -> str:
@@ -329,7 +357,11 @@ def run_tool(shadow: Shadow, view: dict, name: str, arguments: str | dict, detai
         return json.dumps({"error": f"{name} only works while choosing a play or discard"})
     if not shadow.check(view):
         return json.dumps({"error": f"analysis unavailable: {shadow.reason}"})
-    game = shadow.sim.game
+    return _answer(shadow.sim.game, name, args, detail)
+
+
+def _answer(game, name: str, args: dict, detail: bool = False) -> str:
+    """One tool's answer on a game, as a JSON string."""
     try:
         if name == "score_plays":
             return json.dumps(score_plays(game, args.get("top", 8), detail=detail))

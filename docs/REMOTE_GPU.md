@@ -20,6 +20,18 @@ output tokens per decision (thinking included).
   use by others (`FORCE=1` overrides that).
 - **Disk.** ~30 GB free in your home folder on the GPU machine (vLLM ~6 GB, the model ~16 GB).
 
+## 0. Check that the Mac can reach the GPU machine
+TeamViewer only shows the screen; the model's traffic needs its own path. On the GPU machine:
+```bash
+hostname -I; tailscale ip -4 2>/dev/null; curl -s -4 https://ifconfig.me; echo
+```
+Then from the Mac, test SSH on each address (`nc -z -G 5 <address> 22`). A machine on a university or
+lab network usually accepts SSH only from inside that network: from outside, connect to the
+university's VPN with your own login first. If its Tailscale belongs to someone else's account, ask
+them to share the machine with your account (admin console: Machines → ⋯ → Share), or use your own.
+Avoid public tunnels on a shared machine: they expose it to the internet, and services that limit
+request time (about 100 s) would force a smaller answer budget on the baseline.
+
 ## 1. Start the model server (on the GPU machine, through TeamViewer)
 1. Connect with TeamViewer (type the password yourself; refresh it afterwards on the GPU machine's
    TeamViewer window with ↻).

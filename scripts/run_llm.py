@@ -133,6 +133,10 @@ def main() -> None:
         by.setdefault(key, []).append(r)
     for pol, rs in sorted(by.items()):
         print("  " + format_summary(pol, summarize(rs)))
+    offline = [r for r in rows if r.get("tools") and (r.get("analysis") or {}).get("online") is False]
+    if offline:  # the tools stopped answering partway: those games ran with less help than the rest
+        print(f"  analysis went offline in {len(offline)} game(s) with tools (jackdaw disagreed with the game): "
+              + ", ".join(f"{r['seed']} ({(r['analysis'].get('reason') or '')[:80]})" for r in offline))
     pols = sorted(by)
     for i in range(len(pols)):
         for j in range(i + 1, len(pols)):

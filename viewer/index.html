@@ -216,6 +216,8 @@ const ENHC = { BONUS: "#2f9bf0", MULT: "#e0413a", WILD: "#8f5fd0", GLASS: "#7fb6
 const nice = (k) => String(k || "?").replace(/^[jcvp]_/, "").replace(/_\d+$/, "").replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 
 let R = null, cur = 0, view = "game", notes = {};
+const NOTE_TITLE = { invalid_answer: "Invalid answer after this step", analysis_offline: "Analysis went offline here",
+  drift: "jackdaw disagreed with the real game here" };
 
 // ------------------------------------------------------------------ loading
 async function readFile(file) {
@@ -334,7 +336,7 @@ function drawActions() {
     for (const i of rows) {
       const s = R.steps[i], d = s.decision;
       const tools = d && arr(d.tool_calls).length ? `<span class="ic">${arr(d.tool_calls).length}🔧</span>` : "";
-      const warn = R.notesBy[i] ? `<span class="ic" title="invalid model answer after this step">⚠</span>` : "";
+      const warn = R.notesBy[i] ? `<span class="ic" title="${esc(R.notesBy[i].map((n) => NOTE_TITLE[n.kind] || NOTE_TITLE.invalid_answer).join("; "))}">⚠</span>` : "";
       html += `<div class="act k-${s.kind}${s.error ? " err" : ""}${i === cur ? " cur" : ""}" data-i="${i}">` +
         `<span class="txt" title="${esc(s.text)}">${esc(s.text)}</span>${notes[i] ? '<span class="note"></span>' : ""}${tools}${warn}<span class="d">${s.delta}</span></div>`;
     }
@@ -446,6 +448,7 @@ function happenedHTML(s) {
   if (s.method === "play") {
     const hand = area(b, "hand"), idx = arr(p.cards);
     const scoring = new Set(sc ? arr(sc.scoring) : []);
+    if (sc && sc.matches_game === false) h += `<div class="err">This breakdown is from jackdaw, which scored the play ${fmt(sc.total)}; the real game scored ${fmt(sc.game_total)}.</div>`;
     if (sc) h += `<div class="formula"><span class="lvl">LVL ${fmt(sc.level)}</span>${esc(sc.hand)} · <span class="chips">${fmt(sc.chips)}</span><span class="x">×</span><span class="mult">${fmt(sc.mult)}</span><span class="x">=</span>${fmt(sc.total)}${sc.debuffed ? ' <span class="err small">(debuffed by the boss)</span>' : ""}</div>`;
     h += `<div class="cards" style="padding-bottom:4px">${idx.map((i) => hand[i] ? pcHTML(hand[i], null, { dim: sc && !scoring.has(cardKeyLabel(hand[i])) }) : "").join("")}</div>`;
     if (sc && arr(sc.events).length) {
@@ -527,7 +530,7 @@ function renderRight(s) {
     if (arr(d.custom_ids).length) h += `<div class="small muted">exact prompt: requests.jsonl ids ${esc(arr(d.custom_ids).join(", "))}</div>`;
   } else if (s.actor === "auto") h += `<p class="small muted">The harness did this on its own (BalatroLLM selects blinds and cashes out automatically).</p>`;
   for (const n of R.notesBy[cur] || []) {
-    h += `<h3>Invalid answer after this step</h3><div class="err">${esc(n.text)}</div>`;
+    h += `<h3>${esc(NOTE_TITLE[n.kind] || NOTE_TITLE.invalid_answer)}</h3><div class="err">${esc(n.text)}</div>`;
     const nd = obj(n.decision), rs = [...arr(nd.reasoning), obj(nd.model_output).content].filter(Boolean);
     if (rs.length) h += `<div class="reason">${esc(rs.join("\n\n"))}</div>`;
   }

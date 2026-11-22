@@ -134,7 +134,11 @@ resulting game state, for each played hand how it scored (hand, level, chips x m
 and every joker/card/edition effect in order, computed on an identical copy of the game), and for model
 decisions the reasoning, every analysis tool call with its full result, the model's final answer (the
 target for fine-tuning), tokens, and the ids of the exact prompts in BalatroLLM's `requests.jsonl`.
-Records are written as the game goes, so a game in progress can be opened.
+Records are written as the game goes, so a game in progress can be opened. Notes after a step say
+what went wrong there (`kind`: an invalid model answer, the analysis going offline, or jackdaw
+disagreeing with the game); a scoring breakdown jackdaw got wrong carries `matches_game: false` and
+the real game's `game_total`; the end line and the result row report whether the analysis stayed
+online (`analysis`).
 
 ```bash
 uv run python scripts/record_game.py --policy search --assist-money 60 --assist-chips   # record a bot game
@@ -189,7 +193,18 @@ for single-player runs); no code or art is shared.
     create the same joker again (Abstract Joker on seed `JDA02034`, in balatrobot's fast mode and at
     normal speed); jackdaw still counts it as owned and draws a different one (Mail-In Rebate).
 
-  Everything else matched; see the validation table.
+  Everything else matched; see the validation table. Two smaller differences found since:
+  - after Amber Acorn is beaten the game keeps the jokers face down on the round summary; jackdaw
+    turns them face up at once (nothing is decided there, so checks skip that screen);
+  - jackdaw's request bridge accepts `use` and `sell` on the round summary and in open packs, where the
+    real game's API refuses them (`balatro_bot/engine/request_states.py` lists what the API accepts).
+
+  Wherever jackdaw stands in for the real game, its mistakes are caught rather than trusted: every
+  played hand's predicted score is compared with the chips the real game added, and the LLM runner's
+  analysis compares the whole game state before each answer. On any disagreement the analysis stops
+  for the rest of that game (a note in the record; `analysis` in the result row and the run summary
+  name the games), and `scripts/record_game.py` on the engine stops the game with the difference as
+  its error instead of playing on from a wrong state.
 - **Text fields differ by design** between the real game (localized descriptions) and jackdaw (names);
   comparisons skip them. An LLM agent on jackdaw needs its own descriptions.
 
