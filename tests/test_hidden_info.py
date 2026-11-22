@@ -21,6 +21,7 @@ from jackdaw.core import Game  # noqa: E402
 from jackdaw.engine.actions import Discard, GamePhase, SelectBlind  # noqa: E402
 
 from balatro_bot.agent.tools import Shadow, estimate_clear_chance, score_plays  # noqa: E402
+from balatro_bot.search.optimize import optimize_hand, optimize_jokers  # noqa: E402
 from balatro_bot.search.round_search import (  # noqa: E402
     RoundSearchPolicy,
     candidate_actions,
@@ -98,6 +99,7 @@ def test_decisions_depend_only_on_visible_state(states):
             assert candidate_actions(g1, rng=random.Random(5)) == candidate_actions(g2, rng=random.Random(5))
             assert RoundSearchPolicy(worlds=8, seed=3).act(g1) == RoundSearchPolicy(worlds=8, seed=3).act(g2)
             assert score_plays(g1) == score_plays(g2)
+            assert optimize_hand(g1) == optimize_hand(g2) and optimize_jokers(g1) == optimize_jokers(g2)
             assert estimate_clear_chance(g1, worlds=8) == estimate_clear_chance(g2, worlds=8)
     assert leaked  # otherwise the test would prove nothing
 

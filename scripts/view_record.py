@@ -34,10 +34,24 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *args) -> None:
         pass
 
-    def do_GET(self) -> None:  # noqa: N802
+    def _route(self) -> bool:
+        """Map the request onto the viewer or a record; False (and an error sent) if it isn't allowed."""
+        if not self._route_host_only():
+            return False
         if self.path.split("?")[0] in ("/", "/index.html"):
-            self.path = "/viewer/index.html" + (self.path[len(self.path.split("?")[0]):])
-        elif self.path == "/records.json":
+            self.path = "/viewer/index.html" + self.path[len(self.path.split("?")[0]):]
+        # only the viewer and the records, nothing else in the repo: checked on the resolved file, so
+        # "..", symlinks and URL-encoding can't step outside
+        target = Path(self.translate_path(self.path)).resolve()
+        if not any(target.is_relative_to(d) for d in ALLOWED):
+            self.send_error(404)
+            return False
+        return True
+
+    def do_GET(self) -> None:  # noqa: N802
+        if self.path == "/records.json":
+            if not self._route_host_only():
+                return
             body = json.dumps([{"name": str(p.relative_to(ROOT)), "url": "/" + quote(str(p.relative_to(ROOT)))}
                                for p in find_records()]).encode()
             self.send_response(200)
@@ -46,13 +60,21 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        # only the viewer and the records, nothing else in the repo: checked on the resolved file, so
-        # "..", symlinks and URL-encoding can't step outside
-        target = Path(self.translate_path(self.path)).resolve()
-        if not any(target.is_relative_to(d) for d in ALLOWED):
-            self.send_error(404)
-            return
-        super().do_GET()
+        if self._route():
+            super().do_GET()
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        if self._route():
+            super().do_HEAD()
+
+    def _route_host_only(self) -> bool:
+        """Only requests addressed to this local server: another web page can't reach it by pointing
+        its own domain at 127.0.0.1 (DNS rebinding)."""
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            self.send_error(403)
+            return False
+        return True
 
 
 def main() -> None:

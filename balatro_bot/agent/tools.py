@@ -8,12 +8,13 @@ A jackdaw shadow run receives every request in lockstep (shown identical to the 
                         the actual upcoming rolls.
   estimate_clear_chance chance to clear the current blind for candidate plays/discards, over worlds
                         with the unseen deck reshuffled and all randomness resampled (no seed peeking).
-  evaluate_options      in the shop or an open pack: how far the run gets after each candidate plan
-                        ("buy card 0, then leave"), as the chance of reaching each ante and of winning,
-                        over shared imagined futures played to the end (balatro_bot/search/option_eval.py).
 
-score_plays and estimate_clear_chance are offered while choosing a play or discard, evaluate_options in
-the shop and in packs (tools_for_state).
+  optimize_jokers       the joker order that makes the best play score most, and the rearrange to apply it
+  optimize_hand         the best plays with the order their cards should score in (and the rearrange)
+
+All scores are given as guaranteed minimum, best case and average (over redrawn futures), never the
+actual upcoming roll. All of them are offered while choosing a play or discard (tools_for_state); shop
+and pack decisions are left entirely to the model.
 
 Both answer only from what the player sees (the prompt shows face-down cards as "face down"): with
 face-down cards in hand, scores are averages over what those cards could be, and hand types of plays
@@ -32,14 +33,13 @@ import random
 from balatro_bot.validation.diff import first_diff, rules_view
 
 HAND_STATES = ("SELECTING_HAND",)
-OPTION_STATES = ("SHOP", "SMODS_BOOSTER_OPENED")  # BalatroLLM selects blinds itself, so not BLIND_SELECT
 
 TOOL_SCHEMAS: list[dict] = [
     {"type": "function", "function": {
         "name": "score_plays",
         "description": ("Exact score range for the best plays from your current hand, including all jokers, "
                         "enhancements, editions, seals and the boss blind. Returns up to `top` plays with card "
-                        "indices (0-based, hand order), hand type, guaranteed minimum score and best-case score, "
+                        "indices (0-based, hand order), hand type, guaranteed minimum, best-case and average score, "
                         "plus the chips still needed to clear the blind. With face-down cards in hand, scores "
                         "are averages over what those cards could be. Does not take an action."),
         "parameters": {"type": "object", "properties": {
@@ -57,25 +57,29 @@ TOOL_SCHEMAS: list[dict] = [
                 "play": {"type": "array", "items": {"type": "integer"}},
                 "discard": {"type": "array", "items": {"type": "integer"}}}}}},
             "required": []}}},
+]
+TOOL_SCHEMAS += [
     {"type": "function", "function": {
-        "name": "evaluate_options",
-        "description": ("In the shop or an open booster pack: compares candidate plans by how far the run gets "
-                        "afterwards, playing many possible futures (unseen deck and future shops resampled) to the "
-                        "end with a default player. A plan is a list of steps using the game actions, e.g. "
-                        "[{\"buy\": {\"card\": 0}}, {\"next_round\": {}}] or [{\"pack\": {\"card\": 1}}]; in "
-                        "the shop a plan is the whole visit (the shop is left after it). Omit candidates for an "
-                        "automatic shortlist (each purchase, or each pack pick, plus doing nothing). Returns per plan "
-                        "the chance to reach each ante 2-8 and to win, mean ante reached, and a score that weighs "
-                        "later antes more. Does not take an action."),
+        "name": "optimize_jokers",
+        "description": ("Finds the joker order that makes your best play score most (jokers trigger left to right: "
+                        "x-Mult after +Mult multiplies more; Blueprint and Brainstorm copy their neighbour). Returns "
+                        "the best order, the score gain, and the `rearrange` to send to apply it. Does not take an "
+                        "action."),
+        "parameters": {"type": "object", "properties": {}, "required": []}}},
+    {"type": "function", "function": {
+        "name": "optimize_hand",
+        "description": ("Finds your best plays including the order the played cards score in (cards score left to "
+                        "right; jokers like Hanging Chad and Photograph care which card is first). For each play: "
+                        "card indices, scoring order, guaranteed/best-case/average score, and the `rearrange` of your "
+                        "hand to send before playing (the play's indices stay the same). Use optimize_jokers first if "
+                        "joker order matters. Does not take an action."),
         "parameters": {"type": "object", "properties": {
-            "candidates": {"type": "array", "maxItems": 8, "items": {"type": "object", "properties": {
-                "steps": {"type": "array", "items": {"type": "object"},
-                          "description": "e.g. [{\"sell\": {\"joker\": 1}}, {\"buy\": {\"card\": 0}}]"}},
-                "required": ["steps"]}}},
+            "top": {"type": "integer", "minimum": 1, "maximum": 10, "description": "how many plays to return"}},
             "required": []}}},
 ]
 TOOL_NAMES = {t["function"]["name"] for t in TOOL_SCHEMAS}
-_STATES = {"score_plays": HAND_STATES, "estimate_clear_chance": HAND_STATES, "evaluate_options": OPTION_STATES}
+_STATES = {"score_plays": HAND_STATES, "estimate_clear_chance": HAND_STATES, "optimize_jokers": HAND_STATES,
+           "optimize_hand": HAND_STATES}
 
 
 def tools_for_state(state: str | None) -> list[dict]:
@@ -140,15 +144,18 @@ def _blind_info(game) -> dict:
 
 
 def score_plays(game, top: int = 8, worlds: int = 8, seed: int = 0) -> dict:
+    from balatro_bot.search.optimize import average_scores
     from balatro_bot.search.round_search import WorldSampler, has_hidden, ranked_plays, visible_ranked_plays
 
     top = max(1, min(int(top or 8), 20))
     plays = []
     if not has_hidden(game):
-        for score, cards in ranked_plays(game, rolls="low")[:top]:
+        ranked = ranked_plays(game, rolls="low")[:top]
+        avg = average_scores(game, [c for _, c in ranked], seed=seed)
+        for score, cards in ranked:
             high = game.preview_play(cards, rolls="high")
             plays.append({"cards": list(cards), "hand": high.hand_type, "min_score": score,
-                          "max_score": high.total})
+                          "max_score": high.total, "avg_score": avg.get(cards)})
         return {**_blind_info(game), "plays": plays}
     # Face-down cards: score over sampled identities (the same worlds for both bounds), and give the
     # hand type only for plays made of face-up cards (it does not depend on the hidden ones).
@@ -158,11 +165,13 @@ def score_plays(game, top: int = 8, worlds: int = 8, seed: int = 0) -> dict:
     face_down = {i for i, c in enumerate(game.hand) if c.face_down}
     low = visible_ranked_plays(game, rng, worlds, rolls="low", cores=cores)
     high = dict((c, s) for s, c in visible_ranked_plays(game, rng, worlds, rolls="high", cores=cores))
+    avg = average_scores(game, [c for _, c in low[:top]], seed=seed)
     for score, cards in low[:top]:
         known = not face_down.intersection(cards)
         plays.append({"cards": list(cards),
                       "hand": game.preview_play(cards, rolls="low").hand_type if known else "unknown (face-down cards)",
-                      "min_score": round(score, 1), "max_score": round(high.get(cards, score), 1)})
+                      "min_score": round(score, 1), "max_score": round(high.get(cards, score), 1),
+                      "avg_score": avg.get(cards)})
     return {**_blind_info(game), "plays": plays,
             "note": f"scores are averages over {worlds} possibilities for the face-down cards"}
 
@@ -198,9 +207,8 @@ def estimate_clear_chance(game, candidates: list[dict] | None = None, worlds: in
     return {**_blind_info(game), "worlds": worlds, "results": results}
 
 
-def run_tool(shadow: Shadow, view: dict, name: str, arguments: str | dict, evaluator=None) -> str:
-    """Execute a tool call; always returns a JSON string for the tool message. evaluator: the
-    OptionEvaluator settings for evaluate_options (worlds, rollout player, score weights)."""
+def run_tool(shadow: Shadow, view: dict, name: str, arguments: str | dict) -> str:
+    """Execute a tool call; always returns a JSON string for the tool message."""
     try:
         args = json.loads(arguments) if isinstance(arguments, str) else dict(arguments or {})
     except json.JSONDecodeError:
@@ -208,19 +216,20 @@ def run_tool(shadow: Shadow, view: dict, name: str, arguments: str | dict, evalu
     if name not in TOOL_NAMES:
         return json.dumps({"error": f"unknown tool {name!r}"})
     if view.get("state") not in _STATES[name]:
-        where = "while choosing a play or discard" if name in ("score_plays", "estimate_clear_chance") \
-            else "in the shop or an open booster pack"
-        return json.dumps({"error": f"{name} only works {where}"})
+        return json.dumps({"error": f"{name} only works while choosing a play or discard"})
     if not shadow.check(view):
         return json.dumps({"error": f"analysis unavailable: {shadow.reason}"})
     game = shadow.sim.game
     try:
         if name == "score_plays":
             return json.dumps(score_plays(game, args.get("top", 8)))
-        if name == "evaluate_options":
-            from balatro_bot.search.option_eval import OptionEvaluator
+        if name in ("optimize_jokers", "optimize_hand"):
+            from balatro_bot.search.optimize import optimize_hand, optimize_jokers
 
-            return json.dumps((evaluator or OptionEvaluator()).evaluate(game, args.get("candidates")))
+            if name == "optimize_jokers":
+                return json.dumps({**_blind_info(game), **optimize_jokers(game)})
+            top = max(1, min(int(args.get("top") or 5), 10))
+            return json.dumps({**_blind_info(game), **optimize_hand(game, top=top)})
         return json.dumps(estimate_clear_chance(game, args.get("candidates")))
     except Exception as e:  # noqa: BLE001
         return json.dumps({"error": f"{type(e).__name__}: {e}"})

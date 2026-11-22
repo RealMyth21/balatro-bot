@@ -33,7 +33,7 @@ PREFERENCES: list[tuple[str, dict]] = [
 ]
 
 
-ANALYSIS_TOOLS = ("score_plays", "estimate_clear_chance", "evaluate_options")
+ANALYSIS_TOOLS = ("score_plays", "estimate_clear_chance", "optimize_jokers", "optimize_hand")
 
 
 def choose_tool_calls(tools: list[dict], messages: list[dict] | None = None,

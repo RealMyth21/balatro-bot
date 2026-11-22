@@ -41,6 +41,7 @@ def test_parallel_games_with_tools_logs_and_export(tmp_path: Path):
     requests = [json.loads(line)["body"] for p in (tmp_path / "runs").rglob("requests.jsonl")
                 for line in p.read_text().splitlines()]
     assert all("seed" not in r for r in requests)  # --drop-param worked
+    assert not any("**Seed**" in json.dumps(r) for r in requests)  # the prompt never names the run's seed
     # every game has a record: steps in order, model decisions with their tool calls and results
     for r in rows:
         lines = [json.loads(line) for line in Path(r["record"]).read_text().splitlines()]
@@ -51,7 +52,8 @@ def test_parallel_games_with_tools_logs_and_export(tmp_path: Path):
         calls = [t for x in llm for t in x["decision"]["tool_calls"]]
         assert {t["name"] for t in calls} >= {"score_plays", "estimate_clear_chance"}
         assert all(isinstance(t["result"], dict) for t in calls)
-    stats = export(tmp_path / "runs", tmp_path / "sft.jsonl", Filters(keep_outcomes=("successful", "local_tool")))
+    stats = export(tmp_path / "runs", tmp_path / "sft.jsonl",
+                   Filters(keep_outcomes=("successful", "local_tool"), models=("mock-model",)))
     assert stats["runs"] == 2 and stats["examples"] >= 4
 
     # resuming skips seeds that were already played

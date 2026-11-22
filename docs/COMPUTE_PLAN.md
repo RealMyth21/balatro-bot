@@ -19,7 +19,9 @@ CPU cores. More cores means more games in parallel.
 
 ## Which LLMs fit
 - **7–8B models at full precision** (about 16 GB of weights, the rest for the context cache): the
-  default is `Qwen/Qwen2.5-7B-Instruct` (vLLM tool parser `hermes`); Qwen3-8B is the next to try.
+  default is `Qwen/Qwen3-8B` (vLLM tool parser `hermes`, reasoning parser `qwen3`).
+- **Thinking mode:** Qwen3 can reason before answering (`THINKING=1`, the default) or answer directly
+  (`THINKING=0`). Thinking makes replies several times longer, so fewer games per hour; pilot both.
 - **~14B models compressed to 4 bits** (AWQ/GPTQ) also fit, with less room for parallel games.
 - Larger models don't fit on one 24 GB GPU.
 - Small models will be weak at Black Deck / Gold Stake; they're the starting point for fine-tuning,

@@ -27,8 +27,9 @@ tool, in `~/.local/bin`); everything else stays inside the project folder.
    Send that file. If something fails, it still writes that file with the error logs inside, so send
    it anyway.
 
-Leave the terminal open while it runs. With the defaults (2 × 20 games, 4 at a time) it typically
-takes from under an hour to a few hours, depending on the GPU. The GPU is busy the whole time.
+Leave the terminal open while it runs. With the defaults (2 × 20 games, 4 at a time, the model
+thinking before each move) expect several hours; `THINKING=0` is much faster. The GPU is busy the whole
+time.
 
 ## Settings (optional)
 Put them before the command, e.g. `N=50 PARALLEL=6 bash scripts/gpu/run_on_gpu.sh`.
@@ -37,8 +38,12 @@ Put them before the command, e.g. `N=50 PARALLEL=6 bash scripts/gpu/run_on_gpu.s
 |---|---|---|
 | `N` | 20 | games per configuration |
 | `PARALLEL` | 4 | games at once (lower it if you run out of GPU memory) |
-| `MODEL` | `Qwen/Qwen2.5-7B-Instruct` | model from Hugging Face; it must support tool calling |
+| `MODEL` | `Qwen/Qwen3-8B` | model from Hugging Face; it must support tool calling |
 | `TOOL_PARSER` | `hermes` | vLLM's tool-call parser for that model family |
+| `REASONING_PARSER` | `qwen3` | separates the model's thinking from its answer; empty for models that don't think |
+| `THINKING` | 1 | `THINKING=0`: Qwen3 answers without thinking first (faster, usually weaker) |
+| `VLLM_ARGS` | (none) | extra flags for the model server, e.g. `VLLM_ARGS="--enforce-eager"` |
+| `VLLM_SPEC` | `vllm` | which vLLM to install; pin a version that worked, e.g. `VLLM_SPEC="vllm==0.11.0"` |
 | `ARMS` | `notools tools` | configurations to play: game actions only, and with analysis tools |
 | `SPLIT` | `dev` | which fixed list of game seeds to use |
 | `GPU_MEM` | `0.90` | share of GPU memory the model server may use |
@@ -46,9 +51,12 @@ Put them before the command, e.g. `N=50 PARALLEL=6 bash scripts/gpu/run_on_gpu.s
 
 ## If something goes wrong
 - **"No NVIDIA GPU found":** the driver isn't installed or visible (`nvidia-smi` must work).
+- **vLLM fails at startup with a CUDA or driver error:** recent vLLM needs a recent NVIDIA driver; update
+  the driver, or pin an older vLLM with `VLLM_SPEC`.
 - **Out of memory:** run again with `PARALLEL=2` or `GPU_MEM=0.85`.
 - **vLLM did not come up:** the script shows the last lines of `runtime/gpu_logs/<time>/vllm.log`.
-  Send the results file; those logs are in it.
+  Send the results file; those logs are in it. If the log complains about `--reasoning-parser`, your
+  vLLM version names it differently: run with `REASONING_PARSER=` and send the log.
 - **Stopped midway:** run the same command again. Games already finished are skipped.
 
 ## What's in the results file

@@ -4,8 +4,11 @@
   uv run python scripts/run_llm.py --mock --n 4 --parallel 4
 
   # an open-weights model served on the local GPU by vLLM (scripts/gpu/run_on_gpu.sh does all of this):
-  uv run python scripts/run_llm.py --model Qwen/Qwen2.5-7B-Instruct --n 10 --parallel 4
-  uv run python scripts/run_llm.py --model Qwen/Qwen2.5-7B-Instruct --tools --n 10 --parallel 4
+  uv run python scripts/run_llm.py --model Qwen/Qwen3-8B --n 10 --parallel 4
+  uv run python scripts/run_llm.py --model Qwen/Qwen3-8B --tools --n 10 --parallel 4
+  # Qwen3 without its thinking mode (a chat-template switch sent with each request):
+  uv run python scripts/run_llm.py --model Qwen/Qwen3-8B --label qwen3-8b-nothink \
+      --model-config '{"extra_body": {"chat_template_kwargs": {"enable_thinking": false}}}'
 
 The model is any OpenAI-compatible server; by default a local one (vLLM) at http://127.0.0.1:8000/v1,
 which needs no key. Games run on our exact engine by default (real description text for the prompt;
@@ -37,18 +40,12 @@ LOCAL_URL = "http://127.0.0.1:8000/v1"  # vLLM's default
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--label", default=None, help="name for this configuration in the results")
-    ap.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct", help="model name the server serves")
+    ap.add_argument("--model", default="Qwen/Qwen3-8B", help="model name the server serves")
     ap.add_argument("--base-url", default=LOCAL_URL, help="OpenAI-compatible server (default: local vLLM)")
     ap.add_argument("--api-key-env", default="LOCAL_LLM_KEY",
                     help="environment variable holding a key, if the server needs one (a local one doesn't)")
     ap.add_argument("--tools", action="store_true",
-                    help="enable the analysis tools (exact scores, clear odds, shop/pack option evaluation)")
-    ap.add_argument("--option-worlds", type=int, default=12, help="evaluate_options: imagined futures per option")
-    ap.add_argument("--option-rollout", default="search", choices=["search", "smart"],
-                    help="evaluate_options: player that finishes each future (search: stronger; smart: ~10x faster)")
-    ap.add_argument("--option-weights", default=None,
-                    help="evaluate_options score weights: 8 numbers for reaching ante 2..8 and winning "
-                         "(default 1,2,4,8,16,32,64,128)")
+                    help="enable the analysis tools (exact scores, clear odds, joker and card order)")
     ap.add_argument("--backend", default="engine", choices=["engine", "jackdaw"])
     ap.add_argument("--parallel", type=int, default=4)
     ap.add_argument("--split", default="dev", choices=["dev", "heldout", "smoke"])
@@ -94,17 +91,6 @@ def main() -> None:
                 sys.exit(f"set {args.api_key_env} in your shell (the key is read from the environment only)")
             api_key = "local"  # a local server ignores it; the client needs some value
 
-    evaluator = None
-    if args.tools:  # the tools run on jackdaw (sim extra)
-        from balatro_bot.search.option_eval import OptionEvaluator, RunScore
-
-        scorer = RunScore()
-        if args.option_weights:
-            w = [float(x) for x in args.option_weights.split(",")]
-            if len(w) != 8:
-                sys.exit("--option-weights needs 8 numbers: reaching ante 2..8, then winning")
-            scorer = RunScore(reach_weights=tuple(w[:7]), win_weight=w[7])
-        evaluator = OptionEvaluator(worlds=args.option_worlds, rollout=args.option_rollout, scorer=scorer)
     seed_list = seeds(args.split, args.n)
     print(f"{label}: {len(seed_list)} {args.split} seeds, {args.parallel} parallel {args.backend} servers, "
           f"budget ${args.max_cost}")
@@ -118,7 +104,7 @@ def main() -> None:
                 prices=Prices(args.price_in, args.price_out, args.price_cached), max_cost=args.max_cost,
                 max_steps=args.max_steps, strip_cache_control=not args.keep_cache_control,
                 strategies_dir=Path(__file__).resolve().parents[1] / "strategies",
-                drop_params=tuple(args.drop_param), port_alive=pool.alive, option_evaluator=evaluator))
+                drop_params=tuple(args.drop_param), port_alive=pool.alive))
     finally:
         if mock_httpd:
             mock_httpd.shutdown()

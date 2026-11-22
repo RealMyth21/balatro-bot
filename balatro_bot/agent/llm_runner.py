@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from balatro_bot.agent.recorder import Decision, GameRecorder, versions
+from balatro_bot.agent.recorder import READ_ONLY, Decision, GameRecorder, versions
 from balatro_bot.agent.tools import TOOL_NAMES, Shadow, run_tool, tools_for_state
 from balatro_bot.eval.report import error_kind
 
@@ -105,6 +105,12 @@ class Budget:
         return self.spent >= self.limit
 
 
+def _without_seed(text: str) -> str:
+    """BalatroLLM's game-state text names the run's seed. It is no help in playing, and a model trained
+    on these prompts could learn seed-specific outcomes, so it is left out."""
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("- **Seed**"))
+
+
 def _make_bot_class():
     """Defined lazily so the rest of the package works without balatrollm installed."""
     from balatrollm.bot import Bot, BotError
@@ -124,6 +130,8 @@ def _make_bot_class():
             try:
                 result = await self._inner.call(method, params)
             except Exception as e:
+                if self._bot._acting and method not in READ_ONLY:
+                    self._bot._action_failed = True
                 data = getattr(e, "data", None) or {}
                 self._bot._record_step(method, params, error={"name": data.get("name") or type(e).__name__,
                                                               "message": getattr(e, "message", str(e))},
@@ -144,9 +152,8 @@ def _make_bot_class():
         def __init__(self, task, config, port: int, *, tools: bool = False, max_steps: int = 2000,
                      max_tool_rounds: int = 3, strip_cache_control: bool = True,
                      strategies_dir: Path | None = None, drop_params: tuple[str, ...] = (),
-                     budget: Budget | None = None, option_evaluator=None):
+                     budget: Budget | None = None):
             super().__init__(task, config, port)
-            self.option_evaluator = option_evaluator  # settings for evaluate_options (None: defaults)
             self.budget = budget or Budget()
             self.game_spent = 0.0
             for key in drop_params:  # BalatroLLM's config merge can add params but not remove them
@@ -164,6 +171,7 @@ def _make_bot_class():
             self.record_header: dict = {}
             self._decision: Decision | None = None  # the model decision waiting for its game action
             self._acting = False
+            self._action_failed = False
 
         async def __aenter__(self):
             await super().__aenter__()
@@ -174,6 +182,8 @@ def _make_bot_class():
 
         # -- the game record ------------------------------------------------------------------
         def _record_step(self, method: str, params: dict | None, *, result=None, error=None, seconds=None) -> None:
+            if method in READ_ONLY:  # reads (e.g. after an invalid answer) neither are steps nor use the decision
+                return
             if self.recorder is None:
                 if self._collector is None:  # BalatroLLM's connection check, before the run starts
                     return
@@ -208,6 +218,13 @@ def _make_bot_class():
             if self._steps > self.max_steps:
                 raise BotError(f"step cap reached ({self.max_steps} actions)")
             self._recorded = False
+            calls = getattr(response.choices[0].message, "tool_calls", None) or []
+            if calls and calls[0].function.name in TOOL_NAMES:  # an analysis call when none is offered
+                msg = f"{calls[0].function.name} is not available now: choose a game action"
+                if self._decision is not None and self.recorder is not None:
+                    self.recorder.note(msg, self._decision)
+                self._decision = None
+                return await self._handle_error_call(msg)
             if self._decision is not None:  # the reasoning argument BalatroLLM asks for with each action
                 calls = getattr(response.choices[0].message, "tool_calls", None) or []
                 if calls:
@@ -218,6 +235,7 @@ def _make_bot_class():
                     if why:
                         self._decision.extra["action_reasoning"] = why
             self._acting = True
+            self._action_failed = False
             try:
                 state = await super()._execute_tool_call(response)
             finally:
@@ -226,7 +244,8 @@ def _make_bot_class():
                     self.recorder.note(self._last_error_msg or "no valid action", self._decision)
                 self._decision = None
             if not self._recorded:  # the error/failed handlers above record their own outcome
-                self._outcome("successful")
+                # a transport error reaches neither handler: the action never took effect
+                self._outcome("failed" if self._action_failed else "successful")
             return state
 
         # -- LLM call: BalatroLLM's prompt, plus an optional local-tool loop -------------------
@@ -236,7 +255,7 @@ def _make_bot_class():
                 strategy["cache_control"] = {"type": "ephemeral"}
             return [{"role": "user", "content": [
                 strategy,
-                {"type": "text", "text": self.strategy.render_gamestate(gamestate)},
+                {"type": "text", "text": _without_seed(self.strategy.render_gamestate(gamestate))},
                 {"type": "text", "text": self.strategy.render_memory(
                     history=self._history[-10:], last_error=self._last_error_msg,
                     last_failure=self._last_failed_msg)},
@@ -253,9 +272,16 @@ def _make_bot_class():
                 response = await self._llm.call(model=self.task.model, messages=messages, tools=tools,
                                                 model_config=self.model_config)
             except (LLMTimeoutError, LLMClientError) as e:
+                cause = e.__cause__
+                status = getattr(cause, "status_code", None)
+                detail = f"{e} ({type(cause).__name__}: {cause})" if cause is not None else str(e)
                 self._collector.write_response(id=request_id, custom_id=custom_id,
-                                               error=ChatCompletionError(code="error", message=str(e)))
-                raise BotError(f"LLM error: {e}") from e
+                                               error=ChatCompletionError(code="error", message=detail[:2000]))
+                if isinstance(status, int) and 400 <= status < 500 and status not in (408, 429):
+                    # The server rejected this request (e.g. prompt + tool rounds over the context length).
+                    # It fails the same way every time, so it ends the game like the model's own failure.
+                    raise BotError(f"model request rejected (HTTP {status}): {detail[:300]}") from e
+                raise BotError(f"LLM error: {detail[:300]}") from e
             self._collector.write_response(id=str(time.time_ns() // 1_000_000), custom_id=custom_id,
                                            response=ChatCompletionResponse(request_id=request_id, status_code=200,
                                                                            body=response.model_dump()))
@@ -296,6 +322,9 @@ def _make_bot_class():
             local_tools = tools_for_state(gamestate.get("state")) if self.tools_enabled else []
             for rnd in range(self.max_tool_rounds + 1):
                 offer = bool(local_tools) and rnd < self.max_tool_rounds
+                if local_tools and rnd == self.max_tool_rounds:  # the analysis tools are no longer offered
+                    messages = messages + [{"role": "user", "content": (
+                        "You have used all analysis calls for this decision. Choose a game action now.")}]
                 response, _ = await self._call_logged(messages, game_tools + (local_tools if offer else []))
                 msg = response.choices[0].message
                 calls = list(getattr(msg, "tool_calls", None) or [])
@@ -308,7 +337,7 @@ def _make_bot_class():
                 for c in local:  # off the event loop: other games keep running meanwhile
                     t_tool = time.perf_counter()
                     result = await asyncio.to_thread(run_tool, self._shadow, gamestate, c.function.name,
-                                                     c.function.arguments, self.option_evaluator)
+                                                     c.function.arguments)
                     answers.append({"role": "tool", "tool_call_id": c.id, "content": result})
                     if self._decision is not None:
                         try:
@@ -320,6 +349,8 @@ def _make_bot_class():
                                                           "seconds": round(time.perf_counter() - t_tool, 3)})
                 self._outcome("local_tool", tools=[c.function.name for c in local])
                 assistant = msg.model_dump(exclude_none=True)
+                for key in ("reasoning_content", "reasoning"):  # thinking text: recorded, not sent back
+                    assistant.pop(key, None)
                 assistant["tool_calls"] = [tc for tc in assistant.get("tool_calls") or []
                                            if tc["function"]["name"] in TOOL_NAMES]
                 messages = messages + [assistant, *answers]
@@ -333,7 +364,7 @@ async def run_games(*, ports: list[int], seeds: list[str], model: str, base_url:
                     strategy: str = "default", tools: bool = False, model_config: dict | None = None,
                     prices: Prices | None = None, max_cost: float = float("inf"), max_steps: int = 2000,
                     strip_cache_control: bool = True, strategies_dir: Path | None = None,
-                    drop_params: tuple[str, ...] = (), port_alive=None, option_evaluator=None) -> dict:
+                    drop_params: tuple[str, ...] = (), port_alive=None) -> dict:
     """Play each seed once, len(ports) games at a time. Seeds already finished under the same label,
     deck, stake and model are skipped; seeds that stopped on an infrastructure error are retried.
 
@@ -341,8 +372,7 @@ async def run_games(*, ports: list[int], seeds: list[str], model: str, base_url:
     checked before every LLM call (games still running stop when it is reached, and are retried next
     time), and a new game only starts if the games already running are expected to fit.
 
-    port_alive(port) -> bool (e.g. ServerPool.alive): a port whose server died is taken out of use.
-    option_evaluator: settings for the evaluate_options tool (balatro_bot.search.option_eval)."""
+    port_alive(port) -> bool (e.g. ServerPool.alive): a port whose server died is taken out of use."""
     from balatrollm.config import Config, Task
 
     prices = prices or Prices()
@@ -409,16 +439,12 @@ async def run_games(*, ports: list[int], seeds: list[str], model: str, base_url:
             stats = None
             bot = AgentBot(task, config, port, tools=tools, max_steps=max_steps,
                            strip_cache_control=strip_cache_control, strategies_dir=strategies_dir,
-                           drop_params=drop_params, budget=budget, option_evaluator=option_evaluator)
+                           drop_params=drop_params, budget=budget)
             running[seed] = bot
-            ev = option_evaluator
             bot.record_header = {
                 "seed": seed, "deck": deck, "stake": stake, "port": port,
                 "player": {"kind": "llm", "label": label, "model": model, "strategy": strategy, "tools": tools,
-                           "model_config": model_config or {},
-                           "option_evaluator": None if not tools or ev is None else {
-                               "worlds": ev.worlds, "rollout": ev.rollout,
-                               "weights": list(ev.scorer.reach_weights) + [ev.scorer.win_weight]}},
+                           "model_config": model_config or {}},
                 "versions": versions()}
             try:
                 async with bot:

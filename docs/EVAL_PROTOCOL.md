@@ -34,14 +34,11 @@ How precise a win rate is (95% interval half-width, at a true rate of 5%):
 
 ## Arms
 1. `<model>-notools`: BalatroLLM's default strategy, game actions only.
-2. `<model>-tools`: the same, plus `score_plays` and `estimate_clear_chance` while playing a hand and
-   `evaluate_options` in shops and packs (`balatro_bot/agent/tools.py`).
+2. `<model>-tools`: the same, plus while playing a hand `score_plays`, `estimate_clear_chance`,
+   `optimize_jokers` and `optimize_hand` (`balatro_bot/agent/tools.py`). No tool helps with shop and
+   pack decisions: those stay the model's own reasoning. Scores are given as guaranteed minimum, best case and average over
+   redrawn futures, never the actual roll.
 
-`evaluate_options` plays each option's imagined futures to the end of the run with a default player
-(`--option-rollout search`, or the ~10x faster but weaker `smart`), so its numbers reflect that
-player. It reports the raw chance of reaching each ante and of winning, plus a score that weighs
-later antes more; the weights are a setting (`--option-weights`, default doubling per ante), not part
-of the measurement.
 3. Baselines: jackdaw `smart`, `search` (`balatro_bot/search`), `random`.
 
 ## Procedure

@@ -4,6 +4,7 @@
 #
 #   bash scripts/gpu/run_on_gpu.sh                 # defaults below
 #   N=50 PARALLEL=6 bash scripts/gpu/run_on_gpu.sh # more games
+#   THINKING=0 bash scripts/gpu/run_on_gpu.sh      # Qwen3 without its thinking mode (much faster)
 #   MOCK=1 bash scripts/gpu/run_on_gpu.sh          # dry run without a GPU (fake model)
 #
 # What it does: installs the project (uv) and vLLM in its own environment, starts vLLM serving MODEL with
@@ -12,8 +13,12 @@
 # WSL2 on Windows) with an NVIDIA GPU, ~40 GB of free disk, and internet access for the downloads.
 set -euo pipefail
 
-MODEL="${MODEL:-Qwen/Qwen2.5-7B-Instruct}"     # any vLLM model with tool calling
-TOOL_PARSER="${TOOL_PARSER:-hermes}"            # vLLM tool-call parser for MODEL's family (hermes: Qwen 2.5)
+MODEL="${MODEL:-Qwen/Qwen3-8B}"                # any vLLM model with tool calling
+TOOL_PARSER="${TOOL_PARSER:-hermes}"            # vLLM tool-call parser for MODEL's family (hermes: Qwen3, Qwen2.5)
+REASONING_PARSER="${REASONING_PARSER:-qwen3}"   # splits Qwen3's thinking from its answer; "" for non-thinking models
+THINKING="${THINKING:-1}"                       # Qwen3 thinking mode: 1 on, 0 off (faster, shorter replies)
+VLLM_ARGS="${VLLM_ARGS:-}"                      # extra flags for `vllm serve`, e.g. "--enforce-eager"
+VLLM_SPEC="${VLLM_SPEC:-vllm}"                  # what to install, e.g. "vllm==0.11.0" to pin a version that worked
 MAX_LEN="${MAX_LEN:-32768}"                     # the game prompt is ~13k tokens per decision
 GPU_MEM="${GPU_MEM:-0.90}"                      # share of GPU memory vLLM may use
 N="${N:-20}"                                    # games per arm
@@ -37,18 +42,26 @@ pack() {
   say "packing results (exit status $status)"
   {
     echo "date: $STAMP"; echo "model: $MODEL"; echo "tool_parser: $TOOL_PARSER"; echo "n: $N parallel: $PARALLEL"
+    echo "reasoning_parser: $REASONING_PARSER thinking: $THINKING vllm_args: $VLLM_ARGS"
+    "$ROOT/.venv-vllm/bin/python" -c "import vllm; print('vllm:', vllm.__version__)" 2>/dev/null || true
     echo "split: $SPLIT arms: $ARMS mock: $MOCK exit: $status"
     git -C "$ROOT" rev-parse HEAD 2>/dev/null | sed 's/^/commit: /' || true
     nvidia-smi 2>/dev/null || echo "no nvidia-smi"
   } > "$LOGS/run_info.txt"
   out="$ROOT/results/balatro-results-$(hostname -s 2>/dev/null || echo host)-$STAMP.tar.gz"
-  tar czf "$out" -C "$ROOT" runtime/eval runtime/llm_runs runtime/sft "runtime/gpu_logs/$STAMP" 2>/dev/null || \
-    tar czf "$out" -C "$ROOT" "runtime/gpu_logs/$STAMP"
+  parts=()  # only what exists: a run that failed early may have no games or dataset yet
+  for d in runtime/eval runtime/llm_runs runtime/sft "runtime/gpu_logs/$STAMP"; do
+    [ -e "$ROOT/$d" ] && parts+=("$d")
+  done
+  tar czf "$out" -C "$ROOT" "${parts[@]}" || echo "warning: tar reported a problem; check $out"
   say "DONE. Send this file back: $out"
 }
 trap pack EXIT
 
 say "checking the machine"
+for tool in curl git tar; do
+  command -v "$tool" >/dev/null || { echo "Please install $tool first (e.g. sudo apt install $tool)."; exit 1; }
+done
 if [ "$MOCK" != "1" ]; then
   command -v nvidia-smi >/dev/null || { echo "No NVIDIA GPU found (nvidia-smi missing)."; exit 1; }
   nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
@@ -67,12 +80,15 @@ if [ "$MOCK" != "1" ]; then
   if [ ! -x "$ROOT/.venv-vllm/bin/vllm" ]; then
     say "installing vLLM in its own environment (a few GB)"
     uv venv "$ROOT/.venv-vllm" --python 3.12
-    uv pip install --python "$ROOT/.venv-vllm/bin/python" vllm 2>&1 | tail -3
+    uv pip install --python "$ROOT/.venv-vllm/bin/python" "$VLLM_SPEC" 2>&1 | tail -3
   fi
   say "starting vLLM with $MODEL (the first start downloads the model)"
-  "$ROOT/.venv-vllm/bin/vllm" serve "$MODEL" --port "$PORT" --host 127.0.0.1 \
-    --enable-auto-tool-choice --tool-call-parser "$TOOL_PARSER" \
-    --max-model-len "$MAX_LEN" --gpu-memory-utilization "$GPU_MEM" > "$LOGS/vllm.log" 2>&1 &
+  serve_args=(--port "$PORT" --host 127.0.0.1 --enable-auto-tool-choice --tool-call-parser "$TOOL_PARSER"
+              --max-model-len "$MAX_LEN" --gpu-memory-utilization "$GPU_MEM")
+  [ -n "$REASONING_PARSER" ] && serve_args+=(--reasoning-parser "$REASONING_PARSER")
+  # shellcheck disable=SC2206  # VLLM_ARGS is meant to split into separate flags
+  [ -n "$VLLM_ARGS" ] && serve_args+=($VLLM_ARGS)
+  "$ROOT/.venv-vllm/bin/vllm" serve "$MODEL" "${serve_args[@]}" > "$LOGS/vllm.log" 2>&1 &
   VLLM_PID=$!
   for i in $(seq 1 180); do  # up to 30 minutes for download + load
     curl -sf "$BASE_URL/models" >/dev/null && break
@@ -85,10 +101,15 @@ fi
 
 export LOCAL_LLM_KEY="unused"  # the local server needs no key; the runner just reads one
 SHORT="$(basename "$MODEL" | tr '[:upper:]' '[:lower:]')"
+model_config='{}'
+if [ "$THINKING" = "0" ]; then  # Qwen3's chat template switch, passed through to vLLM with each request
+  model_config='{"extra_body": {"chat_template_kwargs": {"enable_thinking": false}}}'
+  SHORT="$SHORT-nothink"
+fi
 for arm in $ARMS; do
   label="$SHORT-$arm"
   extra=()
-  [ "$arm" = "tools" ] && extra+=(--tools --option-rollout smart)  # smart: fast shop evaluation on CPU
+  [ "$arm" = "tools" ] && extra+=(--tools)
   say "playing $N games: $label"
   if [ "$MOCK" = "1" ]; then
     uv run python scripts/run_llm.py --mock --label "mock-$arm" --backend jackdaw --n "$N" \
@@ -96,9 +117,11 @@ for arm in $ARMS; do
   else
     uv run python scripts/run_llm.py --label "$label" --model "$MODEL" --base-url "$BASE_URL" \
       --api-key-env LOCAL_LLM_KEY --price-in 0 --price-out 0 --price-cached 0 --backend jackdaw \
+      --model-config "$model_config" \
       --n "$N" --parallel "$PARALLEL" --split "$SPLIT" ${extra[@]+"${extra[@]}"} 2>&1 | tee "$LOGS/games-$arm.log"
   fi
 done
 
 say "exporting fine-tuning data"
-uv run python scripts/export_sft.py 2>&1 | tail -3 | tee "$LOGS/export.log"
+export_model="$MODEL"; [ "$MOCK" = "1" ] && export_model="mock-model"
+uv run python scripts/export_sft.py --model "$export_model" 2>&1 | tail -3 | tee "$LOGS/export.log"

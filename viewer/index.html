@@ -171,7 +171,8 @@ const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const SUIT = { H: "♥", D: "♦", C: "♣", S: "♠" };
 const RANK = { T: "10" };
-const fmt = (n) => (n == null ? "–" : typeof n === "number" ? (Math.abs(n) >= 1e6 ? n.toExponential(2) : Math.round(n * 100) / 100).toLocaleString() : n);
+const fmt = (n) => (n == null ? "–" : typeof n === "number" ? (Math.abs(n) >= 1e6 ? n.toExponential(2) : Math.round(n * 100) / 100).toLocaleString() : esc(n));
+const arr = (x) => (Array.isArray(x) ? x : x == null ? [] : [x]);   // model-sent fields may be malformed
 const pct = (p) => (p == null ? "–" : (100 * p).toFixed(p >= 0.995 || p < 0.005 ? 0 : 1) + "%");
 
 let REC = null;      // {header, steps, notes, end}
@@ -284,7 +285,7 @@ function drawTimeline() {
     g.idx.map((i) => {
       const s = steps[i];
       const cls = ["tick", s.actor, s.error ? "err" : "", (userNotes[i] || REC.notesByStep[i]) ? "hasnote" : ""].join(" ");
-      return `<div class="${cls}" data-i="${i}" title="${i}: ${esc(s.actor)} ${esc(s.method)}"></div>`;
+      return `<div class="${esc(cls)}" data-i="${i}" title="${i}: ${esc(s.actor)} ${esc(s.method)}"></div>`;
     }).join("") + "</div></div>").join("");
   $("#ticks").onclick = (e) => { const t = e.target.closest(".tick"); if (t) { cur = +t.dataset.i; render(); } };
   drawChart();
@@ -367,7 +368,7 @@ function cardHTML(c, i, opts = {}) {
     : stone ? `<span class="rk">▦</span><span class="mods">stone</span>`
     : `<span class="rk">${esc(RANK[v.rank] || v.rank || "?")}</span><span class="st">${SUIT[v.suit] || ""}</span>` + (mods.length ? `<span class="mods">${esc(mods.join(" · "))}</span>` : "");
   const tip = [c.label, v.effect, st.debuff && "debuffed", st.hidden && "face down", st.highlight && opts.inHand && "forced selection"].filter(Boolean).join(" — ");
-  return `<div class="${cls}" title="${esc(tip)}">${i != null ? `<span class="ix">${i}</span>` : ""}${face}</div>`;
+  return `<div class="${esc(cls)}" title="${esc(tip)}">${i != null ? `<span class="ix">${i}</span>` : ""}${face}</div>`;
 }
 function itemHTML(c, i, opts = {}) {
   const v = c.value || {}, m = Array.isArray(c.modifier) ? {} : (c.modifier || {}), st = Array.isArray(c.state) ? {} : (c.state || {});
@@ -427,13 +428,13 @@ function renderBoard(step) {
   const target = curB ? curB.score : null;
   const progress = target ? Math.min(100, (100 * (rnd.chips || 0)) / target) : 0;
   const blinds = ["small", "big", "boss"].map((k) => (st.blinds || {})[k]).filter(Boolean).map((b) =>
-    `<div class="blind ${b.status}"><div class="nm">${esc(b.name)}</div><div>${fmt(b.score)} chips · <span class="muted">${esc(b.status.toLowerCase())}</span></div>` +
+    `<div class="blind ${esc(b.status)}"><div class="nm">${esc(b.name)}</div><div>${fmt(b.score)} chips · <span class="muted">${esc(String(b.status || "").toLowerCase())}</span></div>` +
     (b.effect ? `<div class="ef">${esc(b.effect)}</div>` : "") + (b.tag_name ? `<div class="ef">Skip: ${esc(b.tag_name)}</div>` : "") + "</div>").join("");
   const sel = (w) => selected(step, w);
   const list = (k, fn) => { const cs = area(st, k); return cs.length ? cs.map(fn).join("") : `<div class="empty">none</div>`; };
   let html = `<h2>Game state before this step · ${esc(st.state || "?")}</h2>
-    <div class="kv"><div>Ante <b>${st.ante_num ?? "?"}</b></div><div>Round <b>${st.round_num ?? "?"}</b></div><div>Money <b>$${st.money ?? "?"}</b></div>
-      <div>Hands <b>${rnd.hands_left ?? "–"}</b></div><div>Discards <b>${rnd.discards_left ?? "–"}</b></div>
+    <div class="kv"><div>Ante <b>${fmt(st.ante_num)}</b></div><div>Round <b>${fmt(st.round_num)}</b></div><div>Money <b>$${fmt(st.money)}</b></div>
+      <div>Hands <b>${fmt(rnd.hands_left)}</b></div><div>Discards <b>${fmt(rnd.discards_left)}</b></div>
       ${curB ? `<div>${esc(curB.name)}: <b>${fmt(rnd.chips || 0)}</b> / ${fmt(target)}</div>` : ""}</div>
     ${curB ? `<div class="bar"><span style="width:${progress}%"></span></div>` : ""}
     <h3>Blinds</h3><div class="blinds">${blinds || '<div class="empty">–</div>'}</div>
@@ -456,7 +457,7 @@ function renderBoard(step) {
 // ---------- rendering the decision ----------
 function describe(step) {
   const st = step.before || {}, p = step.params || {};
-  const names = (k, idx) => (Array.isArray(idx) ? idx : [idx]).map((i) => {
+  const names = (k, idx) => arr(idx).map((i) => {
     const c = area(st, k)[i];
     if (!c) return `#${i}`;
     const v = c.value || {};
@@ -502,31 +503,30 @@ function toolHTML(t, step) {
   if (r.error) body = `<div class="err">${esc(r.error)}</div>`;
   else if (t.name === "score_plays" && r.plays) {
     body = `<div class="small muted">need ${fmt(r.chips_needed)} more · ${r.hands_left} hands, ${r.discards_left} discards${r.face_down_cards ? ` · face down: ${r.face_down_cards}` : ""}${r.forced_card != null ? ` · forced card ${r.forced_card}` : ""}</div>` +
-      `<table><tr><th>Cards</th><th>Hand</th><th>Min</th><th>Max</th></tr>` + r.plays.map((p, i) =>
-        `<tr${i === 0 ? ' class="best"' : ""}><td>${esc(p.cards.join(", "))}</td><td>${esc(p.hand)}</td><td>${fmt(p.min_score)}</td><td>${fmt(p.max_score)}</td></tr>`).join("") + "</table>" +
+      `<table><tr><th>Cards</th><th>Hand</th><th>Min</th><th>Avg</th><th>Max</th></tr>` + r.plays.map((p, i) =>
+        `<tr${i === 0 ? ' class="best"' : ""}><td>${esc(arr(p.cards).join(", "))}</td><td>${esc(p.hand)}</td><td>${fmt(p.min_score)}</td><td>${fmt(p.avg_score)}</td><td>${fmt(p.max_score)}</td></tr>`).join("") + "</table>" +
       (r.note ? `<div class="small muted">${esc(r.note)}</div>` : "");
   } else if ((t.name === "estimate_clear_chance" || t.name === "round_search") && r.results) {
-    const label = (x) => x.action || (x.play ? "play " + x.play.join(", ") : x.discard ? "discard " + x.discard.join(", ") : "?");
+    const label = (x) => x.action || (x.play ? "play " + arr(x.play).join(", ") : x.discard ? "discard " + arr(x.discard).join(", ") : "?");
     const p = (step && step.params) || {};
     const chosen = step && ["play", "discard"].includes(step.method) && p.cards
-      ? (t.name === "round_search" ? `${step.method === "play" ? "PlayHand" : "Discard"}(${p.cards.join(", ")})` : `${step.method} ${p.cards.join(", ")}`) : null;
+      ? (t.name === "round_search" ? `${step.method === "play" ? "PlayHand" : "Discard"}(${arr(p.cards).join(", ")})` : `${step.method} ${arr(p.cards).join(", ")}`) : null;
     const rows = [...r.results].sort((a, b) => (b.clear_chance ?? -1) - (a.clear_chance ?? -1) || (b.mean_progress ?? -1) - (a.mean_progress ?? -1));
     body = `<table><tr><th>Candidate</th><th>Clear chance</th><th>Progress</th></tr>` + rows.map((x) =>
       `<tr${label(x) === chosen ? ' class="best"' : ""}><td>${esc(label(x))}${label(x) === chosen ? ' <span class="badge">chosen</span>' : ""}</td>` +
       `<td>${x.error ? `<span class="err">${esc(x.error)}</span>` : pct(x.clear_chance)}</td><td>${x.mean_progress == null ? "" : pct(x.mean_progress)}</td></tr>`).join("") + "</table>" +
       `<div class="small muted">${r.worlds ? r.worlds + " sampled futures · " : ""}sorted by clear chance; the chosen action is marked</div>`;
-  } else if (t.name === "evaluate_options" && r.options) {
-    const ok = r.options.filter((o) => o.score != null);
-    const antes = ["2", "3", "4", "5", "6", "7", "8"].filter((a) => ok.some((o) => ((o.reach_ante || {})[a] || 0) > 0));
-    const plan = (o) => (o.steps || []).map((st) => {
-      const [m, v] = Object.entries(st)[0] || ["?", {}];
-      return describe({ method: m, params: v || {}, before: step ? step.before : null });
-    }).join(" → ") || "?";
-    body = `<table><tr><th>Plan</th><th>Score</th>${antes.map((a) => `<th>reach ${a}</th>`).join("")}<th>win</th><th>mean ante</th></tr>` + r.options.map((o, i) =>
-      `<tr${i === 0 && o.score != null ? ' class="best"' : ""}><td>${esc(plan(o))}</td>` +
-      (o.error ? `<td colspan="${antes.length + 3}" class="err">${esc(o.error)}</td>` :
-        `<td>${fmt(o.score)}<span class="muted small"> ±${fmt(o.score_stderr)}</span></td>${antes.map((a) => `<td>${pct((o.reach_ante || {})[a])}</td>`).join("")}<td>${pct(o.win_chance)}</td><td>${fmt(o.mean_ante)}</td>`) + "</tr>").join("") + "</table>" +
-      `<div class="small muted">${r.worlds} futures per plan, finished by the ${esc(r.rollout)} player · ranked by score (later antes weigh more) · antes no plan reaches are hidden</div>`;
+  } else if (t.name === "optimize_jokers" && (r.best_order || r.error)) {
+    const play = (x) => x ? `cards ${esc(arr(x.cards).join(", "))}: min ${fmt(x.min)} · avg ${fmt(x.avg)} · max ${fmt(x.max)}` : "–";
+    body = `<table><tr><th></th><th>Joker order</th><th>Best play</th></tr>` +
+      `<tr><td>now</td><td>${esc(arr(r.current_order).join(" → "))}</td><td>${play(r.best_play_now)}</td></tr>` +
+      `<tr class="best"><td>best</td><td>${esc(arr(r.best_order).join(" → "))}</td><td>${play(r.best_play_with_best_order)}</td></tr></table>` +
+      `<div class="small muted">${r.rearrange ? `gain ${fmt(r.gain_guaranteed)} guaranteed chips; rearrange ${esc(JSON.stringify(r.rearrange))}` : "already in the best order"} · ${esc(r.method)}${r.note ? " · " + esc(r.note) : ""}</div>`;
+  } else if (t.name === "optimize_hand" && r.plays) {
+    body = `<table><tr><th>Cards</th><th>Scoring order</th><th>Hand</th><th>Min</th><th>Avg</th><th>Max</th><th>Gain from order</th></tr>` +
+      r.plays.map((p, i) => `<tr${i === 0 ? ' class="best"' : ""}><td>${esc(arr(p.cards).join(", "))}</td><td>${esc(arr(p.scoring_order).join(", "))}</td>` +
+        `<td>${esc(p.hand)}</td><td>${fmt(p.min)}</td><td>${fmt(p.avg)}</td><td>${fmt(p.max)}</td><td>${p.rearrange ? "+" + fmt(p.gain_guaranteed_vs_hand_order) : "–"}</td></tr>`).join("") +
+      "</table>" + (r.note ? `<div class="small muted">${esc(r.note)}</div>` : "");
   } else body = `<pre class="json">${esc(JSON.stringify(r, null, 2))}</pre>`;
   const args = t.arguments && Object.keys(t.arguments).length ? `<div class="small muted">arguments: <code>${esc(JSON.stringify(t.arguments))}</code></div>` : "";
   return `<details class="tool" open><summary>${esc(t.name)}${t.seconds != null ? ` <span class="muted small">${fmt(t.seconds)} s</span>` : ""}</summary><div>${args}${body}</div></details>`;

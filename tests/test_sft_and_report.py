@@ -111,3 +111,12 @@ def test_report_scores_errors_by_kind():
     assert s["policy_failures"] == 1 and s["excluded_infra_errors"] == 1
     p = paired(rows, [{"seed": "A", "won": False, "ante": 3}, {"seed": "C", "won": False, "ante": 2}])
     assert p["common_seeds"] == 1 and p["wins_only_a"] == 1
+
+
+def test_sft_skips_mock_model_games_unless_asked(tmp_path: Path):
+    rd = _write_run(tmp_path, "r", 3, True)
+    req = rd / "requests.jsonl"
+    req.write_text(req.read_text().replace('"model": "m"', '"model": "mock-model"'))
+    assert export(tmp_path, tmp_path / "a.jsonl", Filters())["examples"] == 0
+    assert export(tmp_path, tmp_path / "b.jsonl", Filters(models=("mock-model",)))["examples"] > 0
+    assert export(tmp_path, tmp_path / "c.jsonl", Filters(models=("other",)))["examples"] == 0

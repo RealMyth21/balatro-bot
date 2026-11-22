@@ -27,7 +27,9 @@ def load(path: str | Path) -> list[dict]:
     return [json.loads(line) for line in p.read_text().splitlines() if line.strip()]
 
 
-POLICY_FAILURES = ("Too many consecutive error/failed calls", "step cap reached")
+# The policy's own failures (a loss at the ante reached). "model request rejected": the model server
+# refused a request (e.g. over the context length); retrying replays the same game into the same refusal.
+POLICY_FAILURES = ("Too many consecutive error/failed calls", "step cap reached", "model request rejected")
 
 
 def error_kind(row: dict) -> str | None:

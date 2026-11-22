@@ -23,6 +23,8 @@ class Filters:
     won_only: bool = False
     keep_outcomes: tuple[str, ...] = ("successful",)
     keep_reasoning: bool = True
+    models: tuple[str, ...] = ()  # only games played by these models (empty: any real model)
+    exclude_models: tuple[str, ...] = ("mock-model",)  # test games from the mock model never train anything
 
 
 def _jsonl(path: Path) -> list[dict]:
@@ -46,6 +48,10 @@ def examples_from_run(run_dir: Path, filters: Filters) -> Iterator[dict]:
     if final_ante < filters.min_ante:
         return
     requests = {r["custom_id"]: r.get("body") or {} for r in _jsonl(run_dir / "requests.jsonl")}
+    model = next((b.get("model") for b in requests.values() if b.get("model")), None)
+    if (filters.models and model not in filters.models) or (model in filters.exclude_models
+                                                             and model not in filters.models):
+        return
     responses = {r["custom_id"]: r for r in _jsonl(run_dir / "responses.jsonl")}
     outcomes = {r["custom_id"]: r.get("outcome") for r in _jsonl(run_dir / "outcomes.jsonl")}
     task = json.loads((run_dir / "task.json").read_text()) if (run_dir / "task.json").exists() else {}

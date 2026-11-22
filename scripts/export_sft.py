@@ -25,9 +25,12 @@ def main() -> None:
     ap.add_argument("--won-only", action="store_true")
     ap.add_argument("--with-tool-calls", action="store_true", help="also keep analysis-tool calls as examples")
     ap.add_argument("--no-reasoning", action="store_true", help="drop the model's reasoning text")
+    ap.add_argument("--model", action="append", default=[],
+                    help="only games played by this model (repeatable); mock-model games are skipped unless named")
     args = ap.parse_args()
     keep = ("successful", "local_tool") if args.with_tool_calls else ("successful",)
-    stats = export(args.runs, args.out, Filters(args.min_ante, args.won_only, keep, not args.no_reasoning))
+    stats = export(args.runs, args.out, Filters(args.min_ante, args.won_only, keep, not args.no_reasoning,
+                                                models=tuple(args.model)))
     print(f"{stats['examples']} examples from {stats['runs']} runs -> {stats['out']}")
 
 
